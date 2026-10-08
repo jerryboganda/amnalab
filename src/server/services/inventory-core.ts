@@ -10,16 +10,17 @@ export interface LotBalance {
 }
 
 // Balances per lot for one item in one branch. Expired lots still show here, so they can be wasted.
-export function lotBalances(db: DatabaseSync, branchId: number, itemId: number): LotBalance[] {
+export function lotBalances(db: DatabaseSync, branchId: number, itemId: number, usableOnly = false): LotBalance[] {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi' }).format(new Date());
   return db
     .prepare(
       `SELECT l.id AS lot_id, l.item_id, l.lot_no, l.expiry_date, SUM(g.qty) AS qty
        FROM inv_lots l JOIN inv_ledger g ON g.lot_id = l.id
-       WHERE l.branch_id = ? AND l.item_id = ?
+       WHERE l.branch_id = ? AND l.item_id = ? AND (? = 0 OR l.expiry_date >= ?)
        GROUP BY l.id HAVING SUM(g.qty) > 0.0000001
        ORDER BY l.expiry_date ASC, l.id ASC`,
     )
-    .all(branchId, itemId) as unknown as LotBalance[];
+    .all(branchId, itemId, usableOnly ? 1 : 0, today) as unknown as LotBalance[];
 }
 
 // First-expiry-first-out consumption. Writes one negative ledger line per lot touched.
@@ -39,7 +40,8 @@ export function consumeFefo(
 ): { consumed: number; shortfall: number } {
   let remaining = args.qty;
   let consumed = 0;
-  for (const lot of lotBalances(db, args.branchId, args.itemId)) {
+  // Expired lots are skipped (they can only be written off as wastage).
+  for (const lot of lotBalances(db, args.branchId, args.itemId, args.txnType !== 'wastage' && args.txnType !== 'adjustment')) {
     if (remaining <= 0) break;
     const take = Math.min(lot.qty, remaining);
     db.prepare(

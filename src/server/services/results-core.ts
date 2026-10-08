@@ -118,10 +118,10 @@ export function saveEntries(db: DatabaseSync, actor: AuthUser, itemId: number, e
       const p = byId.get(Number(e.parameterId));
       if (!p) throw badRequest(`Parameter ${e.parameterId} does not belong to this test`);
       if (p.result_type === 'calculated') continue; // computed below
-      const existing = db.prepare('SELECT id, status, value_numeric, value_text, version FROM results WHERE order_item_id = ? AND parameter_id = ?').get(
+      const existing = db.prepare('SELECT id, status, value_numeric, value_text, version, flag, comment FROM results WHERE order_item_id = ? AND parameter_id = ?').get(
         itemId,
         p.id,
-      ) as { id: number; status: string; value_numeric: number | null; value_text: string | null; version: number } | undefined;
+      ) as { id: number; status: string; value_numeric: number | null; value_text: string | null; version: number; flag: string | null; comment: string | null } | undefined;
       if (existing?.status === 'authorized') throw conflict(`${p.name} is authorized. Amend it instead of re-entering.`);
 
       let num: number | null = null;
@@ -141,11 +141,13 @@ export function saveEntries(db: DatabaseSync, actor: AuthUser, itemId: number, e
       const { flag, critical, range } = computeFlag(db, p, num, ageDays, sex);
       if (existing) {
         const changed = existing.value_numeric !== num || existing.value_text !== text;
+        // An unchanged value keeps its review status; only a real change sends it back to draft.
+        if (!changed && (existing.comment ?? null) === (e.comment ?? null)) continue;
         if (changed) {
           db.prepare(
             `INSERT INTO result_revisions (result_id, version, value_numeric, value_text, flag, status, changed_by, reason)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'entry correction')`,
-          ).run(existing.id, existing.version, existing.value_numeric, existing.value_text, null, existing.status, actor.id);
+          ).run(existing.id, existing.version, existing.value_numeric, existing.value_text, existing.flag, existing.status, actor.id);
         }
         db.prepare(
           `UPDATE results SET value_numeric = ?, value_text = ?, flag = ?, ref_low = ?, ref_high = ?, ref_text = ?, unit = ?,
@@ -207,13 +209,20 @@ function recomputeCalculated(db: DatabaseSync, actor: AuthUser, ctx: ItemContext
     if (value == null) continue;
     const rounded = Number(value.toFixed(Math.max(0, p.decimals)));
     const { flag, critical, range } = computeFlag(db, p, rounded, ageDays, sex);
-    const existing = db.prepare('SELECT id FROM results WHERE order_item_id = ? AND parameter_id = ?').get(ctx.id, p.id) as
-      | { id: number }
-      | undefined;
+    const existing = db
+      .prepare('SELECT id, status, value_numeric, version, flag FROM results WHERE order_item_id = ? AND parameter_id = ?')
+      .get(ctx.id, p.id) as { id: number; status: string; value_numeric: number | null; version: number; flag: string | null } | undefined;
     if (existing) {
+      if (existing.value_numeric === rounded) continue;
+      // A changed calculated value is a real result change: keep the old value and send it back for review.
+      db.prepare(
+        `INSERT INTO result_revisions (result_id, version, value_numeric, value_text, flag, status, changed_by, reason)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, 'recalculated')`,
+      ).run(existing.id, existing.version, existing.value_numeric, existing.flag, existing.status, actor.id);
       db.prepare(
         `UPDATE results SET value_numeric = ?, flag = ?, ref_low = ?, ref_high = ?, ref_text = ?, unit = ?, critical = ?,
-                status = CASE WHEN status = 'authorized' THEN status ELSE 'draft' END, entered_by = ?, entered_at = ?
+                status = 'draft', version = version + CASE WHEN status = 'authorized' THEN 1 ELSE 0 END,
+                entered_by = ?, entered_at = ?, reviewed_by = NULL, reviewed_at = NULL, authorized_by = NULL, authorized_at = NULL
          WHERE id = ?`,
       ).run(rounded, flag, range?.low ?? null, range?.high ?? null, range?.text_range ?? null, p.unit, critical ? 1 : 0, actor.id, nowIso(), existing.id);
     } else {
@@ -233,4 +242,72 @@ export function itemHasAuthorizedAll(db: DatabaseSync, itemId: number): boolean 
     )
     .get(itemId) as { total: number; authorized: number | null };
   return row.total > 0 && row.authorized === row.total;
+}
+
+// Amends an authorized result: keeps the old value as a revision, recalculates flags, ranges and
+// dependent calculated values, and sends the test back through review and authorization.
+export function amendResult(
+  db: DatabaseSync,
+  actor: AuthUser,
+  resultId: number,
+  value: { num: number | null; text: string | null },
+  reason: string,
+): { version: number } {
+  const row = db.prepare('SELECT * FROM results WHERE id = ?').get(resultId) as Record<string, any> | undefined;
+  if (!row) throw notFound('Result not found');
+  const ctx = loadItem(db, actor, Number(row.order_item_id));
+  if (row.status !== 'authorized') throw conflict('Only authorized results are amended');
+  const params = activeParams(db, ctx.test_id);
+  const p = params.find((x) => x.id === Number(row.parameter_id));
+  if (!p) throw conflict('This parameter is no longer active');
+  if (p.result_type === 'calculated') throw conflict('Calculated results change when their inputs are amended');
+  if (p.result_type === 'qualitative' && p.qualitative_options && value.text !== null) {
+    const options = JSON.parse(p.qualitative_options) as string[];
+    if (!options.includes(value.text)) throw invalid(`${p.name} must be one of: ${options.join(', ')}`);
+  }
+  const { ageDays, sex } = patientAgeSex(ctx);
+  const { flag, critical, range } = computeFlag(db, p, value.num, ageDays, sex);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(
+      `INSERT INTO result_revisions (result_id, version, value_numeric, value_text, flag, status, changed_by, reason)
+       VALUES (?, ?, ?, ?, ?, 'authorized', ?, ?)`,
+    ).run(resultId, row.version, row.value_numeric, row.value_text, row.flag, actor.id, reason);
+    db.prepare(
+      `UPDATE results SET value_numeric = ?, value_text = ?, flag = ?, critical = ?, ref_low = ?, ref_high = ?, ref_text = ?,
+              status = 'draft', version = version + 1, critical_notified_to = NULL, critical_notified_at = NULL,
+              entered_by = ?, entered_at = ?, reviewed_by = NULL, reviewed_at = NULL, authorized_by = NULL, authorized_at = NULL
+       WHERE id = ?`,
+    ).run(value.num, value.text, flag, critical ? 1 : 0, range?.low ?? null, range?.high ?? null, range?.text_range ?? null, actor.id, nowIso(), resultId);
+    recomputeCalculated(db, actor, ctx, params, ageDays, sex);
+    db.prepare("UPDATE order_items SET status = 'processing', completed_at = NULL WHERE id = ?").run(ctx.id);
+    db.prepare("UPDATE orders SET status = 'in_progress' WHERE id = ?").run(ctx.order_id);
+    audit(db, {
+      actor,
+      branchId: ctx.branch_id,
+      action: 'result.amend',
+      entity: 'result',
+      entityId: resultId,
+      before: { value_numeric: row.value_numeric, value_text: row.value_text, flag: row.flag, version: row.version },
+      after: { value_numeric: value.num, value_text: value.text, flag, reason },
+    });
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return { version: Number(row.version) + 1 };
+}
+
+// Every active hand-entered parameter must have a result before the test can be authorized.
+export function missingParameters(db: DatabaseSync, itemId: number, testId: number): string[] {
+  const rows = db
+    .prepare(
+      `SELECT tp.name FROM test_parameters tp
+       WHERE tp.test_id = ? AND tp.is_active = 1 AND tp.result_type <> 'calculated'
+         AND NOT EXISTS (SELECT 1 FROM results r WHERE r.order_item_id = ? AND r.parameter_id = tp.id AND r.status <> 'cancelled')
+       ORDER BY tp.display_order`,
+    )
+    .all(testId, itemId) as Array<{ name: string }>;
+  return rows.map((r) => r.name);
 }

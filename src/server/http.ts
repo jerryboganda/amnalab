@@ -100,7 +100,11 @@ export class Router {
       if (route.method !== method) continue;
       const params: Record<string, string> = {};
       route.keys.forEach((k, i) => {
-        params[k] = decodeURIComponent(m[i + 1]!);
+        try {
+          params[k] = decodeURIComponent(m[i + 1]!);
+        } catch {
+          throw badRequest('Malformed address');
+        }
       });
       return { route, params };
     }

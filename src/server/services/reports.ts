@@ -37,7 +37,24 @@ export interface ReportRecord {
 }
 
 // Renders the authorized results of an order into a new report version. Previous versions are kept, marked superseded.
+const generating = new Set<number>();
+
 export async function generateReportForOrder(
+  db: DatabaseSync,
+  actor: AuthUser | null,
+  orderId: number,
+  reason: string | null,
+): Promise<ReportRecord> {
+  if (generating.has(orderId)) throw conflict('A report for this order is being generated. Try again in a moment.');
+  generating.add(orderId);
+  try {
+    return await generateUnlocked(db, actor, orderId, reason);
+  } finally {
+    generating.delete(orderId);
+  }
+}
+
+async function generateUnlocked(
   db: DatabaseSync,
   actor: AuthUser | null,
   orderId: number,
@@ -85,7 +102,7 @@ export async function generateReportForOrder(
       r.value_numeric != null ? Number(r.value_numeric).toFixed(Math.max(0, decimals)) : String(r.value_text ?? '');
     const range = rangeLabel(
       { low: r.ref_low as number | null, high: r.ref_high as number | null, text_range: r.ref_text as string | null, sex: 'A', age_min_days: 0, age_max_days: 0, version: 0 },
-      (r.unit as string | null) ?? null,
+      null, // the unit has its own column
     );
     const flagText =
       r.flag === 'LL' ? 'LOW (critical)' : r.flag === 'HH' ? 'HIGH (critical)' : r.flag === 'L' ? 'Low' : r.flag === 'H' ? 'High' : r.flag === 'N' ? 'Normal' : '';
@@ -124,14 +141,16 @@ export async function generateReportForOrder(
   const dob = (order.dob as string | null) ?? null;
   const ageLabel = dob
     ? `${ageInYears(dob, new Date(issuedAt))} years`
-    : `${order.age_years_at_registration} years (at registration)`;
+    : order.age_years_at_registration != null
+      ? `${order.age_years_at_registration} years (at registration)`
+      : 'Not recorded';
 
   const data: ReportData = {
     reportNo,
     version,
     issuedAt: stamp(issuedAt),
-    verificationUrl: `${base}/verify/${code}`,
-    amended: version > 1,
+    verificationUrl: `${base}/#/verify/${code}`,
+    amended: amendments.length > 0,
     amendmentReasons: amendments.map((a) => a.reason),
     branch: {
       name: String(order.branch_name),

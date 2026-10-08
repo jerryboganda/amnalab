@@ -33,10 +33,12 @@ export async function startWhatsApp(reportId: number): Promise<{ outboxId: numbe
 export function Patients({ s }: { s: Session }) {
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<PatientRow[]>([]);
-  const [selected, setSelected] = useState<number | null>(() => {
-    const id = Number(window.location.hash.split('/')[1]);
-    return Number.isInteger(id) && id > 0 ? id : null;
-  });
+  // The open patient lives in the address (#/patients/<id>), so refresh and back work.
+  const hashId = Number(window.location.hash.split('/')[2]);
+  const selected = Number.isInteger(hashId) && hashId > 0 ? hashId : null;
+  const setSelected = (id: number | null) => {
+    window.location.hash = id ? `#/patients/${id}` : '#/patients';
+  };
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error' | 'warn'; text: string; outboxId?: number } | null>(null);
   const load = async (q = query) => setRows(await get<PatientRow[]>(`/api/patients?q=${encodeURIComponent(q)}`));
@@ -69,10 +71,7 @@ export function Patients({ s }: { s: Session }) {
       <PatientDetail
         id={selected}
         s={s}
-        onBack={() => {
-          setSelected(null);
-          void load();
-        }}
+        onBack={() => setSelected(null)}
         onWhatsApp={sendWhatsApp}
         notice={notice}
         onConfirm={confirmSent}
@@ -218,21 +217,14 @@ function RegisterForm({ s, onCreated }: { s: Session; onCreated: (id: number) =>
           </select>
         </Field>
         {f.useDob ? (
-          <Field label="Date of birth"><input type="date" value={f.dob} onChange={set('dob')} max={new Date().toISOString().slice(0, 10)} /></Field>
+          <Field label="Date of birth"><input type="date" required value={f.dob} onChange={set('dob')} max={new Date().toISOString().slice(0, 10)} /></Field>
         ) : (
-          <Field label="Age (years)"><input type="number" min={0} max={120} value={f.ageYears} onChange={set('ageYears')} /></Field>
+          <Field label="Age (years)"><input type="number" required min={0} max={120} value={f.ageYears} onChange={set('ageYears')} /></Field>
         )}
         <Field label="Mobile (Pakistan)" hint="e.g. 0300 1234567"><input value={f.phone} onChange={set('phone')} /></Field>
         <Field label="WhatsApp number" hint="Leave blank to use the mobile number"><input value={f.whatsapp} onChange={set('whatsapp')} /></Field>
         <Field label="Email"><input type="email" value={f.email} onChange={set('email')} /></Field>
-        <Field label="Referring doctor">
-          <select value={f.practitionerId} onChange={set('practitionerId')}>
-            <option value="">Self / none</option>
-            {practitioners.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </Field>
+        <DoctorPicker value={f.practitionerId} onChange={(v) => setF({ ...f, practitionerId: v })} practitioners={practitioners} setPractitioners={setPractitioners} />
         <Field label="Address"><input value={f.address} onChange={set('address')} /></Field>
         <Field label="Known allergies"><input value={f.allergies} onChange={set('allergies')} placeholder="None known" /></Field>
         <fieldset className="consent">
@@ -259,7 +251,7 @@ function RegisterForm({ s, onCreated }: { s: Session; onCreated: (id: number) =>
 }
 
 interface Detail {
-  patient: PatientRow & { address: string | null; allergies: string | null; practitionerName: string | null; dob: string | null };
+  patient: PatientRow & { address: string | null; allergies: string | null; practitionerName: string | null; practitionerId: number | null; dob: string | null };
   history: Array<{ id: number; order_no: string; created_at: string; status: string; priority: string; tests: Array<{ name: string; status: string }> }>;
 }
 
@@ -279,6 +271,7 @@ function PatientDetail({
   onConfirm: (outboxId: number) => void;
 }) {
   const [data, setData] = useState<Detail | null>(null);
+  const [editing, setEditing] = useState(false);
   const act = useAction();
   const reload = () => get<Detail>(`/api/patients/${id}`).then(setData).catch((e: Error) => act.setError(e.message));
   useEffect(() => {
@@ -291,7 +284,7 @@ function PatientDetail({
     await reload();
   }
 
-  if (!data) return <p className="muted">Loading patient...</p>;
+  if (!data) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading patient...</p>;
   const p = data.patient;
   return (
     <>
@@ -309,7 +302,8 @@ function PatientDetail({
       {act.error ? <Notice kind="error">{act.error}</Notice> : null}
       {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
       <div className="grid-2">
-        <Panel title="Details">
+        <Panel title="Details" actions={s.can('patients.write') ? <button onClick={() => setEditing(!editing)}>{editing ? 'Cancel' : 'Edit'}</button> : undefined}>
+          {editing ? <EditPatient p={p} onSaved={() => { setEditing(false); void reload(); }} /> : (
           <dl className="kv">
             <dt>Age / sex</dt><dd>{p.ageYears ?? '-'} / {p.gender}</dd>
             <dt>Date of birth</dt><dd>{p.dob ? dateOnly(p.dob) : 'not recorded'}</dd>
@@ -320,6 +314,7 @@ function PatientDetail({
             <dt>Address</dt><dd>{p.address ?? '-'}</dd>
             <dt>Known allergies</dt><dd>{p.allergies ?? 'None recorded'}</dd>
           </dl>
+          )}
         </Panel>
         <Panel title="Report delivery consent">
           {(['consentWhatsapp', 'consentEmail', 'consentSms'] as const).map((k) => {
@@ -339,7 +334,7 @@ function PatientDetail({
         <Table
           head={['Order', 'Date', 'Tests', 'Status']}
           rows={data.history.map((h) => [
-            <code key="o">{h.order_no}</code>,
+            <a key="o" href={`#/orders/${h.id}`}><code>{h.order_no}</code></a>,
             dateOnly(h.created_at),
             h.tests.map((t) => t.name).join(', '),
             <Badge key="s" tone={h.status === 'completed' ? 'ok' : 'info'}>{h.status.replace('_', ' ')}</Badge>,
@@ -348,5 +343,89 @@ function PatientDetail({
         />
       </Panel>
     </>
+  );
+}
+
+// Referring doctor select with an inline "add" so reception never gets stuck on an empty list.
+function DoctorPicker({
+  value,
+  onChange,
+  practitioners,
+  setPractitioners,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  practitioners: Practitioner[];
+  setPractitioners: (p: Practitioner[]) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  async function add() {
+    const name = window.prompt('Referring doctor name (e.g. Dr. Sana Iqbal)');
+    if (!name || name.trim().length < 2) return;
+    try {
+      const created = await post<{ id: number; name: string }>('/api/practitioners', { name: name.trim() });
+      setPractitioners([...practitioners, created].sort((a, b) => a.name.localeCompare(b.name)));
+      onChange(String(created.id));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  return (
+    <Field label="Referring doctor" hint={error ?? undefined}>
+      <div className="row-actions">
+        <select value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Self / none</option>
+          {practitioners.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        <button type="button" onClick={() => void add()}>+ Add</button>
+      </div>
+    </Field>
+  );
+}
+
+function EditPatient({ p, onSaved }: { p: Detail['patient']; onSaved: () => void }) {
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  const [f, setF] = useState({
+    fullName: p.fullName,
+    phone: p.phone ?? '',
+    whatsapp: p.whatsapp ?? '',
+    email: p.email ?? '',
+    address: p.address ?? '',
+    allergies: p.allergies ?? '',
+    practitionerId: p.practitionerId ? String(p.practitionerId) : '',
+  });
+  const act = useAction();
+  useEffect(() => {
+    get<Practitioner[]>('/api/practitioners').then(setPractitioners).catch(() => setPractitioners([]));
+  }, []);
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    const ok = await act.run(() => patch(`/api/patients/${p.id}`, {
+      fullName: f.fullName,
+      phone: f.phone || null,
+      whatsapp: f.whatsapp || null,
+      email: f.email || null,
+      address: f.address || null,
+      allergies: f.allergies || null,
+      practitionerId: f.practitionerId ? Number(f.practitionerId) : null,
+    }));
+    if (ok) onSaved();
+  }
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  return (
+    <form className="form-grid" onSubmit={(e) => void save(e)}>
+      <Field label="Full name"><input required minLength={2} value={f.fullName} onChange={set('fullName')} /></Field>
+      <Field label="Mobile"><input value={f.phone} onChange={set('phone')} /></Field>
+      <Field label="WhatsApp"><input value={f.whatsapp} onChange={set('whatsapp')} /></Field>
+      <Field label="Email"><input type="email" value={f.email} onChange={set('email')} /></Field>
+      <Field label="Address"><input value={f.address} onChange={set('address')} /></Field>
+      <Field label="Known allergies"><input value={f.allergies} onChange={set('allergies')} /></Field>
+      <DoctorPicker value={f.practitionerId} onChange={(v) => setF({ ...f, practitionerId: v })} practitioners={practitioners} setPractitioners={setPractitioners} />
+      {act.error ? <div className="span-all"><Notice kind="error">{act.error}</Notice></div> : null}
+      <div className="span-all"><button type="submit" className="primary" disabled={act.busy}>Save changes</button></div>
+    </form>
   );
 }

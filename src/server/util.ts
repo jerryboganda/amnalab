@@ -48,6 +48,23 @@ export function ageInYears(dob: string, at: Date = new Date()): number {
 
 export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
+// Stored timestamps are UTC. A lab "day" (YYYY-MM-DD) runs from local midnight in Pakistan (UTC+5, no DST).
+export function dayStartUtc(date: string): string {
+  return new Date(`${date}T00:00:00+05:00`).toISOString();
+}
+export function dayEndUtc(date: string): string {
+  return new Date(new Date(`${date}T00:00:00+05:00`).getTime() + 86_400_000).toISOString();
+}
+
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);

@@ -81,3 +81,11 @@ test('phones: Pakistani mobile formats normalise to 92...', () => {
   assert.equal(normalizePkPhone('12345'), null);
   assert.equal(whatsappLink('923001234567', 'Hi there'), 'https://wa.me/923001234567?text=Hi%20there');
 });
+
+test('lab day boundaries use Pakistan time and timezones are validated', async () => {
+  const { dayStartUtc, dayEndUtc, isValidTimezone } = await import('../../src/server/util.ts');
+  assert.equal(dayStartUtc('2026-10-08'), '2026-10-07T19:00:00.000Z');
+  assert.equal(dayEndUtc('2026-10-08'), '2026-10-08T19:00:00.000Z');
+  assert.equal(isValidTimezone('Asia/Karachi'), true);
+  assert.equal(isValidTimezone('Mars/Olympus'), false);
+});

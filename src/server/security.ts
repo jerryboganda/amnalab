@@ -144,8 +144,9 @@ export function readCookie(req: IncomingMessage, name: string): string | null {
   return null;
 }
 
-export function sessionCookie(token: string, maxAgeSeconds: number): string {
-  return `${config.sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}`;
+export function sessionCookie(token: string): string {
+  // Browser-session cookie; the server enforces the idle timeout on every request.
+  return `${config.sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict`;
 }
 
 export function clearSessionCookie(): string {

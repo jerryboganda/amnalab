@@ -84,6 +84,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
 .toolbar h1 { margin-right: auto; }
 .toolbar-right { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.toolbar-right input, .toolbar-right select, .row-actions input, .row-actions select { width: auto; min-width: 8rem; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 0.9rem; min-width: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
 .panel-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
@@ -166,7 +167,8 @@ input[type='file'] { padding: 0.3rem; }
 .marker-ok { background: var(--ok); }
 .marker-out { background: var(--warn); }
 .marker-crit { background: var(--danger); }
-.range-scale { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+.range-scale { position: relative; height: 1rem; font-size: 0.72rem; color: var(--muted); }
+.range-scale span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 
 /* Auth screens */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 16px; }

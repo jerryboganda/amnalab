@@ -1,4 +1,4 @@
-import { Document, Page, View, Watermark } from '@formepdf/react';
+import { Document, Fixed, Page, View, Watermark } from '@formepdf/react';
 import { renderDocument } from '@formepdf/core';
 import { PdfcnThemeProvider } from '../../pdf/components/theme-provider.tsx';
 import { professionalTheme } from '../../pdf/components/theme-professional.ts';
@@ -47,6 +47,9 @@ export interface ReportData {
   signers: Array<{ name: string; title: string | null }>;
 }
 
+// Column widths in points; A4 content width is 515pt with 40pt margins.
+const W = { param: 165, result: 70, unit: 80, ref: 110, flag: 90 } as const;
+
 const GENDER: Record<string, string> = { M: 'Male', F: 'Female', O: 'Other' };
 
 function ReportDocument({ d }: { d: ReportData }) {
@@ -65,13 +68,14 @@ function ReportDocument({ d }: { d: ReportData }) {
           subtitle={d.branch.motto ?? undefined}
           rightText={`Report ${d.reportNo}`}
           rightSubText={`Version ${d.version}${d.amended ? ' (amended)' : ''}`}
-          address={d.branch.address ?? undefined}
-          phone={d.branch.phone ?? undefined}
-          email={d.branch.email ?? undefined}
+          variant={d.branch.logoDataUri ? 'logo-left' : 'simple'}
           logo={d.branch.logoDataUri ? <PdfImage src={d.branch.logoDataUri} width={48} height={48} fit="contain" /> : undefined}
           fixed
         />
 
+        {[d.branch.address, d.branch.phone, d.branch.email].some(Boolean) ? (
+          <Text variant="sm">{[d.branch.address, d.branch.phone ? `Tel: ${d.branch.phone}` : null, d.branch.email].filter(Boolean).join('  |  ')}</Text>
+        ) : null}
         {d.branch.headerText ? <Text variant="sm">{d.branch.headerText}</Text> : null}
 
         <Section variant="card" spacing="sm">
@@ -102,21 +106,21 @@ function ReportDocument({ d }: { d: ReportData }) {
                 <Table variant="line" zebraStripe>
                   <TableHeader>
                     <TableRow header>
-                      <TableCell header width="34%">Parameter</TableCell>
-                      <TableCell header width="18%" align="right">Result</TableCell>
-                      <TableCell header width="12%">Unit</TableCell>
-                      <TableCell header width="24%">Reference</TableCell>
-                      <TableCell header width="12%">Flag</TableCell>
+                      <TableCell header width={W.param}>Parameter</TableCell>
+                      <TableCell header width={W.result} align="right">Result</TableCell>
+                      <TableCell header width={W.unit}>Unit</TableCell>
+                      <TableCell header width={W.ref}>Reference range</TableCell>
+                      <TableCell header width={W.flag}>Flag</TableCell>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {test.lines.map((l, i) => (
                       <TableRow key={`${l.parameter}-${i}`}>
-                        <TableCell>{l.parameter}</TableCell>
-                        <TableCell align="right" style={{ fontWeight: 700 }}>{l.value}</TableCell>
-                        <TableCell>{l.unit}</TableCell>
-                        <TableCell>{l.reference}</TableCell>
-                        <TableCell style={l.critical ? { color: '#b91c1c', fontWeight: 700 } : {}}>{l.flag}</TableCell>
+                        <TableCell width={W.param}>{l.parameter}</TableCell>
+                        <TableCell width={W.result} align="right" style={{ fontWeight: 700 }}>{l.value}</TableCell>
+                        <TableCell width={W.unit}>{l.unit}</TableCell>
+                        <TableCell width={W.ref}>{l.reference}</TableCell>
+                        <TableCell width={W.flag} style={l.critical ? { color: '#b91c1c', fontWeight: 700 } : l.flag && l.flag !== 'Normal' ? { fontWeight: 700 } : {}}>{l.flag}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -132,7 +136,14 @@ function ReportDocument({ d }: { d: ReportData }) {
         ))}
 
         <View style={{ marginTop: 18 }}>
-          {d.signers.length >= 2 ? (
+          {d.signers.length > 2 ? (
+            <View>
+              <Text weight="semibold">Authorized by</Text>
+              {d.signers.map((sg, i) => (
+                <Text key={i}>{`${sg.name}${sg.title ? ` (${sg.title})` : ''}`}</Text>
+              ))}
+            </View>
+          ) : d.signers.length === 2 ? (
             <PdfSignatureBlock
               variant="double"
               signers={[
@@ -157,8 +168,10 @@ function ReportDocument({ d }: { d: ReportData }) {
           </View>
         </View>
 
-        <PageFooter leftText={d.branch.footerText ?? d.branch.name} rightText={d.reportNo} centerText={`Issued ${d.issuedAt}`} fixed />
-        <PageNumber format="Page {page} of {total}" align="right" fixed />
+        <Fixed position="footer">
+          <PageFooter leftText={d.branch.footerText ?? d.branch.name} rightText={d.reportNo} centerText={`Issued ${d.issuedAt}`} />
+          <PageNumber format="Page {page} of {total}" align="right" />
+        </Fixed>
       </Page>
     </Document>
   );

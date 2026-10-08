@@ -66,7 +66,14 @@ function isSameOrigin(origin: string, host: string | undefined): boolean {
 }
 
 async function serveStatic(pathname: string, res: ServerResponse): Promise<void> {
-  const requested = normalize(join(config.clientDir, pathname === '/' ? 'index.html' : decodeURIComponent(pathname)));
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    res.writeHead(400, SECURITY_HEADERS).end();
+    return;
+  }
+  const requested = normalize(join(config.clientDir, pathname === '/' ? 'index.html' : decoded));
   if (!requested.startsWith(config.clientDir)) {
     res.writeHead(403, SECURITY_HEADERS).end();
     return;
@@ -143,6 +150,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     } catch (err) {
       if (err instanceof HttpError) {
         return writeJson(res, err.status, { error: err.code, message: err.message });
+      }
+      // Database constraints are the last line of defence; report them as input problems, not crashes.
+      const msg = (err as Error)?.message ?? '';
+      if (/FOREIGN KEY constraint failed/i.test(msg)) {
+        return writeJson(res, 422, { error: 'validation_failed', message: 'A referenced record does not exist (check the selected item, doctor, category or branch).' });
+      }
+      if (/UNIQUE constraint failed/i.test(msg)) {
+        return writeJson(res, 409, { error: 'conflict', message: 'This record already exists.' });
+      }
+      if (/CHECK constraint failed/i.test(msg)) {
+        return writeJson(res, 422, { error: 'validation_failed', message: 'A value is outside the allowed choices.' });
       }
       console.error(err);
       return writeJson(res, 500, { error: 'internal_error', message: 'Something went wrong. The details are in the server log.' });

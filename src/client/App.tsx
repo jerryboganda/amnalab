@@ -10,6 +10,7 @@ import { Inventory } from './pages/Inventory.tsx';
 import { Catalog } from './pages/Catalog.tsx';
 import { Notifications } from './pages/Notifications.tsx';
 import { Admin } from './pages/Admin.tsx';
+import { Verify } from './pages/Verify.tsx';
 
 export interface Me {
   id: number;
@@ -29,29 +30,30 @@ export interface Session {
   go: (page: string) => void;
 }
 
-type PageDef = { id: string; label: string; perm: string; render: (s: Session) => ReactElement };
+type PageDef = { id: string; label: string; perm: string[]; render: (s: Session) => ReactElement };
 
 const PAGES: PageDef[] = [
-  { id: 'dashboard', label: 'Dashboard', perm: 'dashboard.read', render: (s) => <Dashboard s={s} /> },
-  { id: 'patients', label: 'Patients', perm: 'patients.read', render: (s) => <Patients s={s} /> },
-  { id: 'orders', label: 'Orders & specimens', perm: 'patients.read', render: (s) => <Orders s={s} /> },
-  { id: 'worklist', label: 'Worklist & results', perm: 'results.enter', render: (s) => <Worklist s={s} /> },
-  { id: 'billing', label: 'Billing', perm: 'billing.read', render: (s) => <Billing s={s} /> },
-  { id: 'inventory', label: 'Inventory', perm: 'inventory.read', render: (s) => <Inventory s={s} /> },
-  { id: 'catalog', label: 'Test catalog', perm: 'catalog.read', render: (s) => <Catalog s={s} /> },
-  { id: 'notifications', label: 'Messages', perm: 'notifications.read', render: (s) => <Notifications s={s} /> },
-  { id: 'admin', label: 'Admin', perm: 'admin.users', render: (s) => <Admin s={s} /> },
+  { id: 'dashboard', label: 'Dashboard', perm: ['dashboard.read'], render: (s) => <Dashboard s={s} /> },
+  { id: 'patients', label: 'Patients', perm: ['patients.read'], render: (s) => <Patients s={s} /> },
+  { id: 'orders', label: 'Orders & specimens', perm: ['patients.read'], render: (s) => <Orders s={s} /> },
+  { id: 'worklist', label: 'Worklist & results', perm: ['results.enter', 'results.review', 'results.authorize'], render: (s) => <Worklist s={s} /> },
+  { id: 'billing', label: 'Billing', perm: ['billing.read'], render: (s) => <Billing s={s} /> },
+  { id: 'inventory', label: 'Inventory', perm: ['inventory.read'], render: (s) => <Inventory s={s} /> },
+  { id: 'catalog', label: 'Test catalog', perm: ['catalog.read'], render: (s) => <Catalog s={s} /> },
+  { id: 'notifications', label: 'Messages', perm: ['notifications.read'], render: (s) => <Notifications s={s} /> },
+  { id: 'admin', label: 'Admin', perm: ['admin.users', 'admin.branches', 'reports.template', 'admin.audit', 'ops.backup'], render: (s) => <Admin s={s} /> },
 ];
 
-function pageFromHash(): string {
-  return (window.location.hash.replace(/^#\/?/, '') || 'dashboard').split('/')[0] || 'dashboard';
+function pageFromHash(hash: string): string {
+  return (hash.replace(/^#\/?/, '') || 'dashboard').split('/')[0] || 'dashboard';
 }
 
 export function App() {
   const [status, setStatus] = useState<'loading' | 'setup' | 'login' | 'ready'>('loading');
   const [me, setMe] = useState<Me | null>(null);
   const [branchId, setBranchId] = useState<number>(() => Number(localStorage.getItem('lms.branch') ?? 0));
-  const [page, setPage] = useState(pageFromHash());
+  const [hash, setHash] = useState(window.location.hash);
+  const page = pageFromHash(hash);
 
   const loadMe = useCallback(async () => {
     try {
@@ -77,7 +79,7 @@ export function App() {
       setMe(null);
       setStatus('login');
     };
-    const onHash = () => setPage(pageFromHash());
+    const onHash = () => setHash(window.location.hash);
     window.addEventListener(SESSION_EXPIRED, onExpired);
     window.addEventListener('hashchange', onHash);
     return () => {
@@ -86,6 +88,8 @@ export function App() {
     };
   }, [loadMe]);
 
+  const verifyCode = /^#\/verify\/([A-Za-z0-9]+)/.exec(hash)?.[1];
+  if (verifyCode) return <Verify code={verifyCode} />;
   if (status === 'loading') return <div className="center muted">Loading...</div>;
   if (status === 'setup') return <Setup onDone={() => void loadMe()} />;
   if (status === 'login' || !me) return <Login onDone={() => void loadMe()} />;
@@ -104,7 +108,7 @@ export function App() {
     },
   };
 
-  const visible = PAGES.filter((p) => session.can(p.perm));
+  const visible = PAGES.filter((p) => p.perm.some((x) => session.can(x)));
   const current = visible.find((p) => p.id === page) ?? visible[0];
 
   async function signOut() {
@@ -142,7 +146,7 @@ export function App() {
         </div>
       </aside>
       <main className="content">
-        {current ? current.render(session) : <p>You do not have access to any screen. Ask an administrator.</p>}
+        {current ? <div key={hash}>{current.render(session)}</div> : <p>You do not have access to any screen. Ask an administrator.</p>}
       </main>
     </div>
   );

@@ -29,7 +29,10 @@ export function Dashboard({ s }: { s: Session }) {
 
   useEffect(() => {
     get<DashData>(`/api/dashboard?branchId=${s.branchId}`)
-      .then(setData)
+      .then((d) => {
+        setData(d);
+        setError(null);
+      })
       .catch((e: Error) => setError(e.message));
   }, [s.branchId]);
 

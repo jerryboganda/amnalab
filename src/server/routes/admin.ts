@@ -3,13 +3,18 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Router } from '../http.ts';
 import { RawResponse, arr, badRequest, bool, conflict, forbidden, int, intParam, json, notFound, oneOf, optStr, str } from '../http.ts';
 import { audit } from '../audit.ts';
-import { hashPassword, passwordProblem, ROLES, requirePerm, type Role } from '../security.ts';
+import { hashPassword, passwordProblem, ROLES, requirePerm, type AuthUser, type Role } from '../security.ts';
 import { getSettings, setSetting, type Settings } from '../services/settings.ts';
 import { readIfExists, saveBrandingImage } from '../services/files.ts';
 import { toCsv } from '../services/csv.ts';
 import { createBackup, listBackups } from '../services/backup.ts';
 import { config } from '../config.ts';
-import { nowIso } from '../util.ts';
+import { dayEndUtc, dayStartUtc, isValidTimezone, nowIso } from '../util.ts';
+
+function validTz(tz: string): string {
+  if (!isValidTimezone(tz)) throw badRequest(`Unknown timezone: ${tz}. Use e.g. Asia/Karachi`);
+  return tz;
+}
 import { branchesFor } from './auth.ts';
 
 function userRow(db: DatabaseSync, id: number) {
@@ -62,7 +67,7 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     const password = str(b, 'password', { max: 200 });
     const problem = passwordProblem(password);
     if (problem) throw badRequest(problem);
-    const branchIds = arr(b, 'branchIds', 50).map((x) => Number(x)).filter((x) => Number.isInteger(x));
+    const branchIds = (Array.isArray(b.branchIds) ? (b.branchIds as unknown[]) : []).map((x) => Number(x)).filter((x) => Number.isInteger(x));
     if (role !== 'admin' && role !== 'qa_auditor' && branchIds.length === 0) {
       throw badRequest('Assign at least one branch to this user');
     }
@@ -173,7 +178,7 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
         optStr(b, 'email', 120),
         optStr(b, 'whatsapp', 40),
         optStr(b, 'motto', 200),
-        optStr(b, 'timezone', 60) ?? 'Asia/Karachi',
+        validTz(optStr(b, 'timezone', 60) ?? 'Asia/Karachi'),
       ) as { id: number };
     audit(db, { actor, branchId: row.id, action: 'branch.create', entity: 'branch', entityId: row.id, after: { name, code } });
     return json({ id: row.id }, 201);
@@ -200,7 +205,7 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     for (const [key, col, max] of text) {
       if (b[key] !== undefined) {
         sets.push(`${col} = ?`);
-        vals.push(key === 'name' || key === 'timezone' ? str(b, key, { max }) : optStr(b, key, max));
+        vals.push(key === 'name' ? str(b, key, { max }) : key === 'timezone' ? validTz(str(b, key, { max })) : optStr(b, key, max));
       }
     }
     if (b.isActive !== undefined) {
@@ -278,7 +283,7 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
   });
 
   // ---- Audit log (admin.audit)
-  const auditRows = (ctx: { query: URLSearchParams }) => {
+  const auditRows = (ctx: { query: URLSearchParams; user: AuthUser }) => {
     const q = ctx.query;
     const where: string[] = [];
     const vals: Array<string | number> = [];
@@ -296,11 +301,17 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     }
     if (q.get('from')) {
       where.push('e.occurred_at >= ?');
-      vals.push(q.get('from')!);
+      vals.push(/^\d{4}-\d{2}-\d{2}$/.test(q.get('from')!) ? dayStartUtc(q.get('from')!) : q.get('from')!);
     }
     if (q.get('to')) {
-      where.push('e.occurred_at <= ?');
-      vals.push(q.get('to')!);
+      where.push('e.occurred_at < ?');
+      vals.push(/^\d{4}-\d{2}-\d{2}$/.test(q.get('to')!) ? dayEndUtc(q.get('to')!) : q.get('to')!);
+    }
+    // Branch managers and other branch-bound auditors see only their branches' events (plus unbranched system events they caused).
+    if (ctx.user.branchIds !== 'all') {
+      const ids = ctx.user.branchIds.length ? ctx.user.branchIds : [-1];
+      where.push(`(e.branch_id IN (${ids.map(() => '?').join(',')}) OR (e.branch_id IS NULL AND e.actor_user_id = ?))`);
+      vals.push(...ids, ctx.user.id);
     }
     const limit = Math.min(Number(q.get('limit') ?? 200) || 200, 5000);
     const sql = `SELECT e.id, e.occurred_at, u.username AS actor, e.branch_id, e.action, e.entity, e.entity_id,
@@ -313,12 +324,12 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
 
   r.get('/api/admin/audit', (ctx) => {
     requirePerm(ctx.user!, 'admin.audit');
-    return auditRows(ctx);
+    return auditRows({ query: ctx.query, user: ctx.user! });
   });
 
   r.get('/api/admin/audit.csv', (ctx) => {
     requirePerm(ctx.user!, 'admin.audit');
-    const rows = auditRows(ctx) as Array<Record<string, any>>;
+    const rows = auditRows({ query: ctx.query, user: ctx.user! }) as Array<Record<string, any>>;
     const header = ['id', 'occurred_at', 'actor', 'branch_id', 'action', 'entity', 'entity_id', 'before_json', 'after_json', 'source'];
     const csv = toCsv([header, ...rows.map((r) => header.map((h) => r[h] as string | number | null))]);
     return new RawResponse('text/csv; charset=utf-8', csv, {

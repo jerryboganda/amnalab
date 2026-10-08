@@ -58,7 +58,7 @@ export function registerNotifications(r: Router, db: DatabaseSync) {
 
   // WhatsApp is staff-operated: "open" reveals the chat link and PDF folder; "confirm" records that staff sent it.
   r.post('/api/notifications/:id/whatsapp', (ctx) => {
-    requirePerm(ctx.user!, 'notifications.write');
+    if (!ctx.user!.perms.has('notifications.write') && !ctx.user!.perms.has('reports.send')) requirePerm(ctx.user!, 'notifications.write');
     const action = oneOf(ctx.body, 'action', ['open', 'confirm'] as const);
     return json(staffWhatsapp(db, ctx.user!, intParam(ctx.params.id!, 'id'), action));
   });

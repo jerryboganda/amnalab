@@ -126,8 +126,7 @@ export function registerAuth(r: Router, db: DatabaseSync) {
     const token = createSession(db, row.id);
     const user = loadUser(db, row.id)!;
     audit(db, { actor: user, action: 'auth.login', entity: 'user', entityId: user.id, source: ctx.ip });
-    const maxAge = config.sessionIdleMinutes * 60;
-    return json(userSummary(db, user), 200, { 'Set-Cookie': sessionCookie(token, maxAge) });
+    return json(userSummary(db, user), 200, { 'Set-Cookie': sessionCookie(token) });
   }, false);
 
   r.post('/api/auth/logout', (ctx) => {

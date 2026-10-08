@@ -181,6 +181,8 @@ export function registerInventory(r: Router, db: DatabaseSync) {
     const lotNo = str(b, 'lotNo', { max: 60 });
     const supplierId = b.supplierId == null ? null : int(b, 'supplierId', { min: 1 });
     const locationId = b.locationId == null ? null : int(b, 'locationId', { min: 1 });
+    if (supplierId && !db.prepare('SELECT id FROM inv_suppliers WHERE id = ?').get(supplierId)) throw badRequest('Supplier not found');
+    if (locationId && !db.prepare('SELECT id FROM inv_locations WHERE id = ? AND branch_id = ?').get(locationId, branchId)) throw badRequest('Storage location not found in this branch');
     db.exec('BEGIN IMMEDIATE');
     try {
       const lotId = getOrCreateLot(db, { itemId, branchId, lotNo, expiry, supplierId, locationId });
@@ -206,8 +208,8 @@ export function registerInventory(r: Router, db: DatabaseSync) {
     itemRow(db, itemId);
     const qty = num(b, 'qty', { min: 0.001, max: 1_000_000 });
     const reason = str(b, 'reason', { max: 200, min: 3 });
-    const available = lotBalances(db, branchId, itemId).reduce((s, l) => s + l.qty, 0);
-    if (qty > available) throw conflict(`Only ${available} available in this branch`);
+    const available = lotBalances(db, branchId, itemId, true).reduce((s, l) => s + l.qty, 0);
+    if (qty > available) throw conflict(`Only ${available} unexpired units available in this branch`);
     db.exec('BEGIN IMMEDIATE');
     try {
       consumeFefo(db, { branchId, itemId, qty, txnType: 'issue', reason, reference: optStr(b, 'reference', 80), userId: user.id });
@@ -235,6 +237,7 @@ export function registerInventory(r: Router, db: DatabaseSync) {
     const qty = num(b, 'qty', { min: -1_000_000, max: 1_000_000 });
     if (qty === 0) throw invalid('Quantity cannot be zero');
     const txnType = oneOf(b, 'txnType', ['adjustment', 'wastage', 'return'] as const, false) || 'adjustment';
+    if ((txnType === 'wastage' || txnType === 'return') && qty > 0) throw invalid('Wastage and returns reduce stock: enter a negative quantity');
     const reason = str(b, 'reason', { max: 200, min: 5 });
     const onHand = lotOnHand(db, lotId);
     if (onHand + qty < -1e-9) throw conflict(`Adjustment would make the lot negative (on hand ${onHand})`);
@@ -269,13 +272,13 @@ export function registerInventory(r: Router, db: DatabaseSync) {
     if (fromBranch === toBranch) throw badRequest('Source and destination branch are the same');
     const itemId = int(b, 'itemId', { min: 1 });
     const qty = num(b, 'qty', { min: 0.001, max: 1_000_000 });
-    const available = lotBalances(db, fromBranch, itemId).reduce((s, l) => s + l.qty, 0);
+    const available = lotBalances(db, fromBranch, itemId, true).reduce((s, l) => s + l.qty, 0);
     if (qty > available) throw conflict(`Only ${available} available at the source branch`);
     const reason = str(b, 'reason', { max: 200, min: 3 });
     db.exec('BEGIN IMMEDIATE');
     try {
       let remaining = qty;
-      for (const lot of lotBalances(db, fromBranch, itemId)) {
+      for (const lot of lotBalances(db, fromBranch, itemId, true)) {
         if (remaining <= 0) break;
         const take = Math.min(lot.qty, remaining);
         db.prepare(

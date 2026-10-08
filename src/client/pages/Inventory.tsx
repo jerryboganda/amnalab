@@ -105,22 +105,26 @@ function Receive({ s, items, onDone }: { s: Session; items: StockItem[]; onDone:
   const [f, setF] = useState({ itemId: '', qty: '', lotNo: '', expiryDate: '', reference: '' });
   const [suppliers, setSuppliers] = useState<Master[]>([]);
   const [supplierId, setSupplierId] = useState('');
+  const [locations, setLocations] = useState<Master[]>([]);
+  const [locationId, setLocationId] = useState('');
   const act = useAction();
   useEffect(() => {
     get<Master[]>('/api/inventory/suppliers').then(setSuppliers).catch(() => setSuppliers([]));
+    get<Master[]>(`/api/inventory/locations?branchId=${s.branchId}`).then(setLocations).catch(() => setLocations([]));
   }, []);
 
   async function submit() {
-    await act.run(() => post('/api/inventory/receipts', {
+    const ok = await act.run(() => post('/api/inventory/receipts', {
       branchId: s.branchId,
       itemId: Number(f.itemId),
       qty: Number(f.qty),
       lotNo: f.lotNo,
       expiryDate: f.expiryDate,
       supplierId: supplierId ? Number(supplierId) : null,
+      locationId: locationId ? Number(locationId) : null,
       reference: f.reference || undefined,
     }));
-    if (!act.error) {
+    if (ok) {
       onDone(`Received ${f.qty} of lot ${f.lotNo}`);
       setF({ itemId: '', qty: '', lotNo: '', expiryDate: '', reference: '' });
     }
@@ -139,6 +143,12 @@ function Receive({ s, items, onDone }: { s: Session; items: StockItem[]; onDone:
             {suppliers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>
         </Field>
+        <Field label="Storage location">
+          <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+            <option value="">-</option>
+            {locations.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </Field>
         <Field label="Invoice / delivery reference"><input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></Field>
       </div>
       {act.error ? <Notice kind="error">{act.error}</Notice> : null}
@@ -151,8 +161,8 @@ function Issue({ s, items, onDone }: { s: Session; items: StockItem[]; onDone: (
   const [f, setF] = useState({ itemId: '', qty: '', reason: '' });
   const act = useAction();
   async function submit() {
-    await act.run(() => post('/api/inventory/issues', { branchId: s.branchId, itemId: Number(f.itemId), qty: Number(f.qty), reason: f.reason }));
-    if (!act.error) {
+    const ok = await act.run(() => post('/api/inventory/issues', { branchId: s.branchId, itemId: Number(f.itemId), qty: Number(f.qty), reason: f.reason }));
+    if (ok) {
       onDone('Issued. Oldest-expiring lots were used first.');
       setF({ itemId: '', qty: '', reason: '' });
     }
@@ -175,20 +185,18 @@ function Adjust({ s, items, onDone }: { s: Session; items: StockItem[]; onDone: 
   const [itemId, setItemId] = useState('');
   const [lotId, setLotId] = useState('');
   const [f, setF] = useState({ qty: '', reason: '', txnType: 'adjustment', approverUser: '', approverPass: '' });
-  const [needApprover, setNeedApprover] = useState(false);
+
   const act = useAction();
   const item = items.find((i) => String(i.id) === itemId);
   const qtyNum = Number(f.qty);
 
   async function submit() {
     const body: Record<string, unknown> = { branchId: s.branchId, lotId: Number(lotId), qty: qtyNum, reason: f.reason, txnType: f.txnType };
-    if (needApprover) body.approver = { username: f.approverUser, password: f.approverPass };
+    if (f.approverUser) body.approver = { username: f.approverUser, password: f.approverPass };
     const out = await act.run(() => post('/api/inventory/adjustments', body));
     if (out) {
       onDone('Adjustment recorded in the ledger.');
       setF({ qty: '', reason: '', txnType: 'adjustment', approverUser: '', approverPass: '' });
-    } else if (act.error && /approver/i.test(act.error)) {
-      setNeedApprover(true);
     }
   }
 
@@ -212,9 +220,9 @@ function Adjust({ s, items, onDone }: { s: Session; items: StockItem[]; onDone: 
         <Field label="Quantity change" hint="Use a minus sign to reduce stock"><input type="number" step="any" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></Field>
         <Field label="Reason (required)"><input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
       </div>
-      {needApprover || Math.abs(qtyNum) > 10 ? (
+      {Math.abs(qtyNum) > 0 ? (
         <div className="form-grid">
-          <Field label="Approver username" hint="A different user with adjustment approval"><input value={f.approverUser} onChange={(e) => setF({ ...f, approverUser: e.target.value })} /></Field>
+          <Field label="Approver username" hint="Needed only above the approval threshold set in Admin settings. Must be a different user."><input value={f.approverUser} onChange={(e) => setF({ ...f, approverUser: e.target.value })} /></Field>
           <Field label="Approver password"><input type="password" value={f.approverPass} onChange={(e) => setF({ ...f, approverPass: e.target.value })} autoComplete="off" /></Field>
         </div>
       ) : null}
@@ -233,14 +241,14 @@ function Transfer({ s, items, onDone }: { s: Session; items: StockItem[]; onDone
     get<Array<{ id: number; name: string; code: string }>>('/api/branches').then((list) => setBranches(list.map((b) => ({ id: b.id, name: `${b.name} (${b.code})` })))).catch(() => setBranches([]));
   }, []);
   async function submit() {
-    await act.run(() => post('/api/inventory/transfers', {
+    const ok = await act.run(() => post('/api/inventory/transfers', {
       fromBranchId: s.branchId,
       toBranchId: Number(f.toBranchId),
       itemId: Number(f.itemId),
       qty: Number(f.qty),
       reason: f.reason,
     }));
-    if (!act.error) {
+    if (ok) {
       onDone('Transfer recorded at both branches.');
       setF({ itemId: '', toBranchId: '', qty: '', reason: '' });
     }
@@ -329,7 +337,11 @@ function ItemSelect({ items, value, onChange }: { items: StockItem[]; value: str
 
 function ItemMaster({ s, onChanged }: { s: Session; onChanged: () => void }) {
   const [rows, setRows] = useState<Array<{ id: number; code: string; name: string; unit: string; reorder_level: number; near_expiry_days: number; is_active: number }>>([]);
-  const [f, setF] = useState({ code: '', name: '', unit: 'pcs', reorderLevel: '0', nearExpiryDays: '60' });
+  const [f, setF] = useState({ code: '', name: '', unit: 'pcs', reorderLevel: '0', nearExpiryDays: '60', categoryId: '' });
+  const [categories, setCategories] = useState<Master[]>([]);
+  useEffect(() => {
+    get<Master[]>('/api/inventory/categories').then(setCategories).catch(() => setCategories([]));
+  }, []);
   const act = useAction();
   const load = () => get(`/api/inventory/items`).then(setRows).catch(() => setRows([]));
   useEffect(() => {
@@ -338,8 +350,8 @@ function ItemMaster({ s, onChanged }: { s: Session; onChanged: () => void }) {
   }, []);
 
   async function create() {
-    await act.run(() => post('/api/inventory/items', { code: f.code, name: f.name, unit: f.unit, reorderLevel: Number(f.reorderLevel), nearExpiryDays: Number(f.nearExpiryDays) }), 'Item added');
-    setF({ code: '', name: '', unit: 'pcs', reorderLevel: '0', nearExpiryDays: '60' });
+    const created = await act.run(() => post('/api/inventory/items', { code: f.code, name: f.name, unit: f.unit, reorderLevel: Number(f.reorderLevel), nearExpiryDays: Number(f.nearExpiryDays), categoryId: f.categoryId ? Number(f.categoryId) : null }), 'Item added');
+    if (created) setF({ code: '', name: '', unit: 'pcs', reorderLevel: '0', nearExpiryDays: '60', categoryId: '' });
     await load();
     onChanged();
   }
@@ -358,6 +370,12 @@ function ItemMaster({ s, onChanged }: { s: Session; onChanged: () => void }) {
             <Field label="Code"><input value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} /></Field>
             <Field label="Name"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Unit"><input value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} /></Field>
+            <Field label="Category">
+              <select value={f.categoryId} onChange={(e) => setF({ ...f, categoryId: e.target.value })}>
+                <option value="">-</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
             <Field label="Reorder level"><input type="number" min={0} value={f.reorderLevel} onChange={(e) => setF({ ...f, reorderLevel: e.target.value })} /></Field>
             <Field label="Near-expiry warning (days)"><input type="number" min={0} value={f.nearExpiryDays} onChange={(e) => setF({ ...f, nearExpiryDays: e.target.value })} /></Field>
           </div>
@@ -365,6 +383,7 @@ function ItemMaster({ s, onChanged }: { s: Session; onChanged: () => void }) {
           <button className="primary" disabled={act.busy || !f.code || !f.name} onClick={() => void create()}>Add item</button>
         </Panel>
       ) : null}
+      {s.can('inventory.write') ? <Masters s={s} onChanged={() => get<Master[]>('/api/inventory/categories').then(setCategories)} /> : null}
       <Panel title="Items">
         <Table
           head={['Code', 'Name', 'Unit', 'Reorder level', 'Near-expiry days', '']}
@@ -383,5 +402,58 @@ function ItemMaster({ s, onChanged }: { s: Session; onChanged: () => void }) {
         />
       </Panel>
     </>
+  );
+}
+
+// Suppliers, categories and storage locations used by items and receipts.
+function Masters({ s, onChanged }: { s: Session; onChanged: () => void }) {
+  const [lists, setLists] = useState<{ categories: Master[]; suppliers: Master[]; locations: Master[] }>({ categories: [], suppliers: [], locations: [] });
+  const [names, setNames] = useState({ categories: '', suppliers: '', locations: '' });
+  const act = useAction();
+  const load = async () => {
+    const [categories, suppliers, locations] = await Promise.all([
+      get<Master[]>('/api/inventory/categories'),
+      get<Master[]>('/api/inventory/suppliers'),
+      get<Master[]>(`/api/inventory/locations?branchId=${s.branchId}`),
+    ]);
+    setLists({ categories, suppliers, locations });
+  };
+  useEffect(() => {
+    load().catch((e: Error) => act.setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.branchId]);
+
+  async function add(kind: 'categories' | 'suppliers' | 'locations') {
+    const name = names[kind].trim();
+    if (!name) return;
+    const body = kind === 'locations' ? { name, branchId: s.branchId } : { name };
+    const ok = await act.run(() => post(`/api/inventory/${kind}`, body), 'Added');
+    if (ok) {
+      setNames({ ...names, [kind]: '' });
+      await load();
+      onChanged();
+    }
+  }
+
+  const block = (kind: 'categories' | 'suppliers' | 'locations', title: string) => (
+    <div>
+      <h3>{title}</h3>
+      <ul className="plain">{lists[kind].map((m) => <li key={m.id}>{m.name}</li>)}</ul>
+      <div className="row-actions">
+        <input value={names[kind]} onChange={(e) => setNames({ ...names, [kind]: e.target.value })} aria-label={`New ${title.toLowerCase()}`} placeholder="Name" />
+        <button disabled={act.busy || !names[kind].trim()} onClick={() => void add(kind)}>Add</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <Panel title="Suppliers, categories and storage locations">
+      {act.error ? <Notice kind="error">{act.error}</Notice> : null}
+      <div className="form-grid">
+        {block('suppliers', 'Suppliers')}
+        {block('categories', 'Categories')}
+        {block('locations', 'Storage locations (this branch)')}
+      </div>
+    </Panel>
   );
 }

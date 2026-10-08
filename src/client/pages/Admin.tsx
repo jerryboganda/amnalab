@@ -72,8 +72,8 @@ function Users({ s }: { s: Session }) {
   }, []);
 
   async function create() {
-    await act.run(() => post('/api/admin/users', f), 'User created');
-    setF({ username: '', fullName: '', role: 'reception', password: '', branchIds: [] });
+    const ok = await act.run(() => post('/api/admin/users', f), 'User created');
+    if (ok) setF({ username: '', fullName: '', role: 'reception', password: '', branchIds: [] });
     await load();
   }
 
@@ -153,8 +153,8 @@ function Branches() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   async function create() {
-    await act.run(() => post('/api/admin/branches', f), 'Branch added. Give its users access under Users.');
-    setF({ name: '', code: '', address: '', phone: '', email: '', whatsapp: '', motto: '' });
+    const ok = await act.run(() => post('/api/admin/branches', f), 'Branch added. Give its users access under Users.');
+    if (ok) setF({ name: '', code: '', address: '', phone: '', email: '', whatsapp: '', motto: '' });
     await load();
   }
   return (

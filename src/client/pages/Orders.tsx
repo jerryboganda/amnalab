@@ -22,7 +22,7 @@ const STATUS_TONE: Record<string, 'neutral' | 'ok' | 'warn' | 'info' | 'danger'>
 };
 
 export function Orders({ s }: { s: Session }) {
-  const id = Number(window.location.hash.split('/')[1]);
+  const id = Number(window.location.hash.split('/')[2]);
   if (Number.isInteger(id) && id > 0) return <OrderDetail s={s} id={id} />;
   return <OrderList s={s} />;
 }
@@ -293,6 +293,13 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
     await load();
   }
 
+  async function cancelItem(itemId: number, name: string) {
+    const reason = window.prompt(`Reason for cancelling ${name} (required). Refund any payment from Billing.`);
+    if (!reason || reason.trim().length < 5) return;
+    await act.run(() => post(`/api/order-items/${itemId}/cancel`, { reason }), `${name} cancelled`);
+    await load();
+  }
+
   async function reissue() {
     const reason = window.prompt('Reason for re-issuing this report (required)');
     if (!reason) return;
@@ -310,7 +317,7 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
     await act.run(() => post(`/api/reports/${reportId}/send`, { channel: cfg.channel, destination: cfg.destination || undefined }), `Queued for ${cfg.channel}`);
   }
 
-  if (!order) return <p className="muted">Loading order...</p>;
+  if (!order) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading order...</p>;
   const invoice = order.invoice;
   const due = invoice ? invoice.total_paisa - invoice.paid_paisa + invoice.refunded_paisa : 0;
 
@@ -327,7 +334,7 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
       {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
       {pendingWa ? (
         <Notice kind="info">
-          WhatsApp chat is open. After you attach the PDF and press send: <button onClick={() => void act.run(() => post(`/api/notifications/${pendingWa}/whatsapp`, { action: 'confirm' }), 'Recorded as sent').then(() => setPendingWa(null))}>I sent it</button>
+          WhatsApp chat is open. After you attach the PDF and press send: <button onClick={() => void act.run(() => post(`/api/notifications/${pendingWa}/whatsapp`, { action: 'confirm' }), 'Recorded as sent').then((r) => r && setPendingWa(null))}>I sent it</button>
         </Notice>
       ) : null}
 
@@ -357,10 +364,13 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
               {['expected', 'collected', 'received'].includes(sp.status) && s.can('specimens.write') ? (
                 <button className="danger" onClick={() => setPendingReject(sp.id)}>Reject</button>
               ) : null}
-              {['received', 'processing'].includes(sp.status) && s.can('specimens.write') ? (
+              {sp.status === 'rejected' && !sp.recollect_required && s.can('specimens.write') ? (
+                <button onClick={() => void specimenAction(sp.id, 'recollect', {}, 'New specimen requested for recollection')}>Recollect</button>
+              ) : null}
+              {['received', 'processing'].includes(sp.status) && s.can('specimens.write') && order.items.filter((i) => i.specimen_id === sp.id).every((i) => i.status === 'completed' || i.status === 'cancelled') ? (
                 <button onClick={() => void specimenAction(sp.id, 'store', { disposition: 'stored' }, 'Stored')}>Store</button>
               ) : null}
-              <button onClick={() => window.open(`/api/specimens/${sp.id}/label`, '_blank', 'noopener')}>Label</button>
+              {s.can('specimens.write') ? <button onClick={() => window.open(`/api/specimens/${sp.id}/label`, '_blank', 'noopener')}>Label</button> : null}
             </span>,
           ])}
           empty="No specimens"
@@ -378,12 +388,15 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
 
       <Panel title="Tests">
         <Table
-          head={['Test', 'Department', 'Status', 'Authorized']}
+          head={['Test', 'Department', 'Status', 'Authorized', '']}
           rows={order.items.map((i) => [
             i.test_name,
             i.department_name,
-            <Badge key="s" tone={i.status === 'completed' ? 'ok' : 'info'}>{i.status}</Badge>,
+            <Badge key="s" tone={i.status === 'completed' ? 'ok' : i.status === 'cancelled' ? 'danger' : 'info'}>{i.status}</Badge>,
             `${i.authorized_count} / ${i.result_count}`,
+            s.can('orders.write') && i.status !== 'completed' && i.status !== 'cancelled' ? (
+              <button key="c" className="danger" onClick={() => void cancelItem(i.id, i.test_name)}>Cancel test</button>
+            ) : null,
           ])}
         />
         {s.can('results.enter') ? <p><a href="#/worklist">Open the worklist to enter results &rarr;</a></p> : null}

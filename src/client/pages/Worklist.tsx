@@ -40,6 +40,7 @@ interface ParamView {
     version: number;
     critical: number;
     comment: string | null;
+    entered_by: number | null;
   } | null;
 }
 
@@ -59,7 +60,7 @@ interface ItemView {
 const FLAG_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral'> = { N: 'ok', L: 'warn', H: 'warn', LL: 'danger', HH: 'danger' };
 
 export function Worklist({ s }: { s: Session }) {
-  const itemId = Number(window.location.hash.split('/')[1]);
+  const itemId = Number(window.location.hash.split('/')[2]);
   if (Number.isInteger(itemId) && itemId > 0) return <Entry s={s} itemId={itemId} />;
   return <List s={s} />;
 }
@@ -152,16 +153,26 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId]);
 
-  if (!item) return <p className="muted">Loading...</p>;
+  if (!item) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading...</p>;
   const specimenReady = item.specimen.status === 'received' || item.specimen.status === 'processing';
   const criticals = item.parameters.filter((p) => p.result?.critical === 1 && p.result.status !== 'authorized' && p.result.status !== 'cancelled');
   const allReviewed = item.parameters.filter((p) => p.result && p.result.status !== 'cancelled').every((p) => p.result?.status === 'reviewed' || p.result?.status === 'authorized');
   const anyEntered = item.parameters.some((p) => p.result);
+  // Reviewers must be a different person from whoever entered the draft values.
+  const draftsByOthers = item.parameters.some((p) => p.result?.status === 'draft' && p.result.entered_by !== s.me.id);
 
   async function saveEntries() {
     const body = {
       values: item!.parameters
-        .filter((p) => p.resultType !== 'calculated')
+        // Send only new or changed values; resaving unchanged ones would undo the technical review.
+        .filter((p) => p.resultType !== 'calculated' && p.result?.status !== 'authorized')
+        .filter((p) => {
+          const v = values[p.id] ?? { num: '', text: '', comment: '' };
+          const r = p.result;
+          if (!r) return true;
+          const valueSame = p.resultType === 'numeric' ? v.num !== '' && Number(v.num) === r.value_numeric : v.text === (r.value_text ?? '');
+          return !valueSame || v.comment !== (r.comment ?? '');
+        })
         .map((p) => {
           const v = values[p.id] ?? { num: '', text: '', comment: '' };
           if (p.resultType === 'numeric') return { parameterId: p.id, valueNumeric: v.num === '' ? null : Number(v.num), comment: v.comment };
@@ -169,6 +180,10 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         })
         .filter((x) => ('valueNumeric' in x ? x.valueNumeric !== null : (x.valueText ?? '') !== '')),
     };
+    if (body.values.length === 0) {
+      act.setOk('Nothing changed');
+      return;
+    }
     await act.run(() => post(`/api/order-items/${itemId}/results`, body), 'Results saved');
     await load();
   }
@@ -184,24 +199,25 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
       return;
     }
     const out = await act.run(
-      () => post<{ orderCompleted: boolean; report: { reportNo: string; version: number } | null }>(`/api/order-items/${itemId}/authorize`, {
+      () => post<{ orderCompleted: boolean; report: { reportNo: string; version: number } | null; reportError: string | null }>(`/api/order-items/${itemId}/authorize`, {
         criticalNotifiedTo: criticals.length ? notify : undefined,
       }),
       'Authorized',
     );
     if (out?.orderCompleted) {
-      act.setOk(out.report ? `Authorized. Report ${out.report.reportNo} v${out.report.version} is ready.` : 'Authorized. The order is complete.');
+      if (out.reportError) act.setError(`Authorized, but the report could not be generated: ${out.reportError}. Use Re-issue on the order.`);
+      else act.setOk(out.report ? `Authorized. Report ${out.report.reportNo} v${out.report.version} is ready.` : 'Authorized. The order is complete.');
     }
     await load();
   }
 
   async function submitAmend() {
     if (!amend) return;
-    await act.run(
+    const done = await act.run(
       () => post(`/api/results/${amend.resultId}/amend`, { valueNumeric: amend.value !== '' && !Number.isNaN(Number(amend.value)) ? Number(amend.value) : undefined, valueText: amend.value, reason: amend.reason }),
       'Amended. It needs review and authorization again by a different person.',
     );
-    setAmend(null);
+    if (done) setAmend(null);
     await load();
   }
 
@@ -232,6 +248,7 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
       {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
 
       <Panel title="Results">
+        <div className="table-wrap">
         <table className="table results">
           <thead>
             <tr>
@@ -291,7 +308,7 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
                   <td>{p.unit ?? ''}</td>
                   <td className="range-cell">
                     {p.range?.label ?? p.range?.text ?? <span className="muted small">no approved range</span>}
-                    {p.range && p.range.low != null || p.range?.high != null ? (
+                    {p.range && (p.range.low != null || p.range.high != null) ? (
                       <RangeBar low={p.range!.low} high={p.range!.high} critLow={p.criticalLow} critHigh={p.criticalHigh} value={numVal} unit={p.unit} />
                     ) : null}
                   </td>
@@ -311,11 +328,13 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
             })}
           </tbody>
         </table>
+        </div>
 
-        {s.can('results.enter') && specimenReady && item.status !== 'completed' ? (
+        {specimenReady && item.status !== 'completed' ? (
           <div className="row-actions">
-            <button className="primary" onClick={() => void saveEntries()} disabled={act.busy}>Save results</button>
-            {s.can('results.review') && anyEntered ? <button onClick={() => void review()} disabled={act.busy}>Technical review</button> : null}
+            {s.can('results.enter') ? <button className="primary" onClick={() => void saveEntries()} disabled={act.busy}>Save results</button> : null}
+            {act.error ? <span className="text-warn" role="alert">{act.error}</span> : act.ok ? <span className="muted" role="status">{act.ok}</span> : null}
+            {s.can('results.review') && draftsByOthers ? <button onClick={() => void review()} disabled={act.busy}>Technical review</button> : null}
           </div>
         ) : null}
 

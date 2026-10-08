@@ -127,7 +127,13 @@ export function registerPatients(r: Router, db: DatabaseSync) {
       .all(phone, phone, whatsapp ?? phone, fullName, dob, dob, dob, ageYears) as Array<Record<string, any>>;
     if (dupes.length > 0 && !bool(b, 'force')) {
       return json(
-        { error: 'possible_duplicate', message: 'A patient with the same phone or name and date of birth already exists. Confirm to register anyway.', duplicates: dupes.map(patientDto) },
+        {
+          error: 'possible_duplicate',
+          message: 'A patient with the same phone or name and date of birth already exists. Confirm to register anyway.',
+          duplicates: dupes.map((d) =>
+            patientVisible(db, user, Number(d.id)) ? patientDto(d) : { id: null, mrn: d.mrn, fullName: d.full_name, phone: null },
+          ),
+        },
         409,
       );
     }
@@ -216,6 +222,9 @@ export function registerPatients(r: Router, db: DatabaseSync) {
       consent_sms: b.consentSms !== undefined ? (bool(b, 'consentSms') ? 1 : 0) : before.consent_sms,
     };
     if (next.phone && !normalizePkPhone(String(next.phone))) throw invalid('Phone must be a valid Pakistani mobile number');
+    if (next.whatsapp && !normalizePkPhone(String(next.whatsapp))) throw invalid('WhatsApp must be a valid Pakistani mobile number');
+    if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(next.email))) throw invalid('Email address looks invalid');
+    if (next.practitioner_id && !db.prepare('SELECT id FROM practitioners WHERE id = ?').get(next.practitioner_id)) throw badRequest('Referring doctor not found');
     db.prepare(
       `UPDATE patients SET full_name = ?, phone = ?, whatsapp = ?, email = ?, address = ?, allergies = ?, practitioner_id = ?,
               consent_whatsapp = ?, consent_email = ?, consent_sms = ?, updated_by = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')

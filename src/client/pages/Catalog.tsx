@@ -39,7 +39,7 @@ interface ParamDetail {
   decimals: number;
   resultType: string;
   formula: string | null;
-  options: string[] | null;
+  qualitativeOptions: string[] | null;
   criticalLow: number | null;
   criticalHigh: number | null;
   ranges: Range[];
@@ -53,7 +53,7 @@ interface TestDetail extends TestRow {
 }
 
 export function Catalog({ s }: { s: Session }) {
-  const id = Number(window.location.hash.split('/')[1]);
+  const id = Number(window.location.hash.split('/')[2]);
   if (Number.isInteger(id) && id > 0) return <TestView s={s} id={id} />;
   return <TestList s={s} />;
 }
@@ -116,7 +116,7 @@ function TestList({ s }: { s: Session }) {
         </div>
       </div>
       {csvMsg ? <Notice kind="info">{csvMsg}</Notice> : null}
-      {creating ? <NewTest s={s} depts={depts} onCreated={(id) => { setCreating(false); window.location.hash = `#/catalog/${id}`; }} /> : null}
+      {creating ? <NewTest s={s} depts={depts} tests={rows.filter((t) => !t.isPanel)} onCreated={(id) => { setCreating(false); window.location.hash = `#/catalog/${id}`; }} /> : null}
       <Panel>
         <Table
           head={['Code', 'Name', 'Department', 'Specimen', 'Price (PKR)', 'TAT (h)', 'Type']}
@@ -136,8 +136,9 @@ function TestList({ s }: { s: Session }) {
   );
 }
 
-function NewTest({ s, depts, onCreated }: { s: Session; depts: Array<{ id: number; name: string }>; onCreated: (id: number) => void }) {
+function NewTest({ s, depts, tests, onCreated }: { s: Session; depts: Array<{ id: number; name: string }>; tests: TestRow[]; onCreated: (id: number) => void }) {
   const [f, setF] = useState({ code: '', name: '', departmentId: '', specimenType: 'EDTA whole blood', price: '0', tat: '24', isPanel: false });
+  const [members, setMembers] = useState<number[]>([]);
   const act = useAction();
   async function submit() {
     const out = await act.run(() => post<{ id: number }>('/api/catalog/tests', {
@@ -148,6 +149,7 @@ function NewTest({ s, depts, onCreated }: { s: Session; depts: Array<{ id: numbe
       basePricePkr: Number(f.price),
       tatHours: Number(f.tat),
       isPanel: f.isPanel,
+      memberTestIds: f.isPanel ? members : undefined,
     }));
     if (out) onCreated(out.id);
   }
@@ -165,10 +167,23 @@ function NewTest({ s, depts, onCreated }: { s: Session; depts: Array<{ id: numbe
         <Field label="Specimen type"><input value={f.specimenType} onChange={(e) => setF({ ...f, specimenType: e.target.value })} /></Field>
         <Field label="Price (PKR)"><input type="number" min={0} value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></Field>
         <Field label="Turnaround (hours)"><input type="number" min={1} value={f.tat} onChange={(e) => setF({ ...f, tat: e.target.value })} /></Field>
-        <label className="check"><input type="checkbox" checked={f.isPanel} onChange={(e) => setF({ ...f, isPanel: e.target.checked })} /> This is a panel (adds member tests later)</label>
+        <label className="check"><input type="checkbox" checked={f.isPanel} onChange={(e) => setF({ ...f, isPanel: e.target.checked })} /> This is a panel of other tests</label>
       </div>
+      {f.isPanel ? (
+        <fieldset>
+          <legend>Panel members ({members.length} chosen)</legend>
+          <div className="test-grid">
+            {tests.map((t) => (
+              <label key={t.id} className={`test-chip ${members.includes(t.id) ? 'on' : ''}`}>
+                <input type="checkbox" checked={members.includes(t.id)} onChange={(e) => setMembers(e.target.checked ? [...members, t.id] : members.filter((x) => x !== t.id))} />
+                <span>{t.name} <span className="muted small">{t.code}</span></span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
       {act.error ? <Notice kind="error">{act.error}</Notice> : null}
-      <button className="primary" disabled={act.busy || !f.code || !f.name || !f.departmentId || !s.can('catalog.write')} onClick={() => void submit()}>Create test</button>
+      <button className="primary" disabled={act.busy || !f.code || !f.name || !f.departmentId || !s.can('catalog.write') || (f.isPanel && members.length === 0)} onClick={() => void submit()}>Create test</button>
     </Panel>
   );
 }
@@ -184,7 +199,7 @@ function TestView({ s, id }: { s: Session; id: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (!test) return <p className="muted">Loading test...</p>;
+  if (!test) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading test...</p>;
   const canWrite = s.can('catalog.write');
 
   return (
@@ -307,7 +322,7 @@ function ParamBlock({
   const pending = p.ranges.filter((r) => r.status === 'pending');
 
   async function propose() {
-    await run(() => post(`/api/catalog/parameters/${p.id}/ranges`, {
+    const ok = await run(() => post(`/api/catalog/parameters/${p.id}/ranges`, {
       sex: range.sex,
       low: range.low === '' ? undefined : Number(range.low),
       high: range.high === '' ? undefined : Number(range.high),
@@ -316,7 +331,12 @@ function ParamBlock({
       ageMinDays: Number(range.ageMin),
       ageMaxDays: Number(range.ageMax),
     }), 'Range proposed. A different pathologist must approve it.');
-    setRange({ sex: 'A', low: '', high: '', text: '', note: '', ageMin: '0', ageMax: '36500' });
+    if (ok) setRange({ sex: 'A', low: '', high: '', text: '', note: '', ageMin: '0', ageMax: '36500' });
+    onChanged();
+  }
+
+  async function verify(id: number) {
+    await run(() => post(`/api/catalog/ranges/${id}/verify`), 'Range verified');
     onChanged();
   }
 
@@ -333,7 +353,7 @@ function ParamBlock({
         {p.unit ? <span className="muted small"> ({p.unit})</span> : null}
         {p.resultType !== 'numeric' ? <Badge tone="neutral">{p.resultType}</Badge> : null}
       </h3>
-      {p.options ? <p className="small">Options: {p.options.join(', ')}</p> : null}
+      {p.qualitativeOptions ? <p className="small">Options: {p.qualitativeOptions.join(', ')}</p> : null}
       {p.formula ? <p className="small">Formula: <code>{p.formula}</code></p> : null}
       {approved.length === 0 ? <p className="muted small">No approved reference range. Flags will not be calculated.</p> : null}
       <Table
@@ -344,7 +364,9 @@ function ParamBlock({
           r.text_range ?? `${r.low ?? '-'} to ${r.high ?? '-'}`,
           <Badge key="s" tone={r.status === 'approved' ? 'ok' : r.status === 'pending' ? 'warn' : 'neutral'}>{r.status}</Badge>,
           <span key="n" className="small">{r.note ?? ''} {r.approved_by ? '' : r.status === 'approved' ? '(starter, unverified)' : ''}</span>,
-          r.status === 'pending' && canApprove && r.created_by !== userId ? (
+          r.status === 'approved' && !r.approved_by && canApprove ? (
+            <button key="v" disabled={busy} onClick={() => void verify(r.id)}>Verify</button>
+          ) : r.status === 'pending' && canApprove && r.created_by !== userId ? (
             <button key="a" disabled={busy} onClick={() => void approve(r.id)}>Approve</button>
           ) : r.status === 'pending' && r.created_by === userId ? (
             <span key="a" className="muted small">awaiting another pathologist</span>
@@ -383,7 +405,7 @@ function ParamBlock({
 function AddParam({ testId, run, busy, onAdded }: { testId: number; run: ReturnType<typeof useAction>['run']; busy: boolean; onAdded: () => void }) {
   const [f, setF] = useState({ code: '', name: '', unit: '', resultType: 'numeric', decimals: '1', formula: '', options: '', critLow: '', critHigh: '' });
   async function add() {
-    await run(() => post(`/api/catalog/tests/${testId}/parameters`, {
+    const ok = await run(() => post(`/api/catalog/tests/${testId}/parameters`, {
       code: f.code,
       name: f.name,
       unit: f.unit || undefined,
@@ -394,7 +416,7 @@ function AddParam({ testId, run, busy, onAdded }: { testId: number; run: ReturnT
       criticalLow: f.critLow === '' ? undefined : Number(f.critLow),
       criticalHigh: f.critHigh === '' ? undefined : Number(f.critHigh),
     }), 'Parameter added');
-    setF({ code: '', name: '', unit: '', resultType: 'numeric', decimals: '1', formula: '', options: '', critLow: '', critHigh: '' });
+    if (ok) setF({ code: '', name: '', unit: '', resultType: 'numeric', decimals: '1', formula: '', options: '', critLow: '', critHigh: '' });
     onAdded();
   }
   return (

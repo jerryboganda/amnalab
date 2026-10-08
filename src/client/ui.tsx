@@ -131,8 +131,8 @@ export function RangeBar({
         ) : null}
       </div>
       <div className="range-scale">
-        <span>{low ?? ''}</span>
-        <span>{high ?? ''}</span>
+        {low != null ? <span style={{ left: pct(low) }}>{low}</span> : null}
+        {high != null ? <span style={{ left: pct(high) }}>{high}</span> : null}
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { config, loadFileConfig, type FileConfig } from '../config.ts';
 import { audit } from '../audit.ts';
 import { badRequest, conflict, notFound } from '../http.ts';
-import type { AuthUser } from '../security.ts';
+import { assertBranch, type AuthUser } from '../security.ts';
 import { nowIso } from '../util.ts';
 
 export type Channel = 'email' | 'sms' | 'whatsapp';
@@ -150,11 +150,12 @@ export function queueReport(
 
 export function staffWhatsapp(db: DatabaseSync, actor: AuthUser, id: number, action: 'open' | 'confirm'): unknown {
   const row = db
-    .prepare("SELECT id, channel, destination, body, attachment_path, status FROM outbox WHERE id = ?")
+    .prepare("SELECT id, branch_id, channel, destination, body, attachment_path, status FROM outbox WHERE id = ?")
     .get(id) as
-    | { id: number; channel: string; destination: string; body: string; attachment_path: string | null; status: string }
+    | { id: number; branch_id: number; channel: string; destination: string; body: string; attachment_path: string | null; status: string }
     | undefined;
   if (!row || row.channel !== 'whatsapp') throw notFound('WhatsApp message not found');
+  assertBranch(actor, row.branch_id);
   if (action === 'open') {
     if (row.status !== 'awaiting_staff') throw conflict('This message was already sent');
     if (row.attachment_path && existsSync(row.attachment_path) && process.platform === 'win32') {
@@ -254,7 +255,20 @@ async function sendSms(row: { destination: string; body: string }): Promise<stri
 }
 
 // Called on a timer. Sends due email/SMS items, retries with backoff, and marks them failed after MAX_ATTEMPTS.
+let outboxRunning = false;
+
 export async function processOutbox(db: DatabaseSync): Promise<number> {
+  // One run at a time, whether started by the timer or by a user, so nothing is sent twice.
+  if (outboxRunning) return 0;
+  outboxRunning = true;
+  try {
+    return await sendDue(db);
+  } finally {
+    outboxRunning = false;
+  }
+}
+
+async function sendDue(db: DatabaseSync): Promise<number> {
   const due = db
     .prepare(
       `SELECT id, channel, destination, subject, body, attachment_path, attempts FROM outbox
@@ -273,6 +287,11 @@ export async function processOutbox(db: DatabaseSync): Promise<number> {
   }>;
   let sent = 0;
   for (const item of due) {
+    // Claim the row first: push its next attempt out so a parallel process cannot pick it up.
+    const claim = db
+      .prepare("UPDATE outbox SET next_attempt_at = ?, updated_at = ? WHERE id = ? AND status IN ('queued','retrying')")
+      .run(new Date(Date.now() + 15 * 60_000).toISOString(), nowIso(), item.id);
+    if (claim.changes === 0) continue;
     try {
       const providerId =
         item.channel === 'email'
@@ -304,8 +323,9 @@ export async function processOutbox(db: DatabaseSync): Promise<number> {
 }
 
 export function retryOutbox(db: DatabaseSync, actor: AuthUser, id: number): void {
-  const row = db.prepare('SELECT status, channel FROM outbox WHERE id = ?').get(id) as { status: string; channel: string } | undefined;
+  const row = db.prepare('SELECT status, channel, branch_id FROM outbox WHERE id = ?').get(id) as { status: string; channel: string; branch_id: number } | undefined;
   if (!row) throw notFound('Message not found');
+  assertBranch(actor, row.branch_id);
   if (row.channel === 'whatsapp') throw conflict('WhatsApp messages are sent by staff, not retried');
   if (!['failed', 'retrying', 'queued'].includes(row.status)) throw conflict('Only failed or waiting messages can be retried');
   db.prepare("UPDATE outbox SET status = 'queued', attempts = 0, next_attempt_at = ?, last_error = NULL, updated_at = ? WHERE id = ?").run(
@@ -317,8 +337,9 @@ export function retryOutbox(db: DatabaseSync, actor: AuthUser, id: number): void
 }
 
 export function cancelOutbox(db: DatabaseSync, actor: AuthUser, id: number): void {
-  const row = db.prepare('SELECT status FROM outbox WHERE id = ?').get(id) as { status: string } | undefined;
+  const row = db.prepare('SELECT status, branch_id FROM outbox WHERE id = ?').get(id) as { status: string; branch_id: number } | undefined;
   if (!row) throw notFound('Message not found');
+  assertBranch(actor, row.branch_id);
   if (!['queued', 'retrying', 'awaiting_staff'].includes(row.status)) throw conflict('This message can no longer be cancelled');
   db.prepare("UPDATE outbox SET status = 'cancelled', updated_at = ? WHERE id = ?").run(nowIso(), id);
   audit(db, { actor, action: 'notify.cancel', entity: 'outbox', entityId: id });

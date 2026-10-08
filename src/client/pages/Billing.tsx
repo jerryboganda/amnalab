@@ -40,7 +40,7 @@ interface InvoiceDetail {
 const METHODS = ['cash', 'card', 'bank_transfer', 'jazzcash', 'easypaisa'];
 
 export function Billing({ s }: { s: Session }) {
-  const id = Number(window.location.hash.split('/')[1]);
+  const id = Number(window.location.hash.split('/')[2]);
   const [tab, setTab] = useState<'invoices' | 'closing'>('invoices');
   if (Number.isInteger(id) && id > 0) return <InvoiceView s={s} id={id} />;
   return (
@@ -108,16 +108,16 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
   }, [id]);
 
   async function addPayment() {
-    await act.run(
+    const ok = await act.run(
       () => post(`/api/invoices/${id}/payments`, { method: pay.method, amountPkr: Number(pay.amount), reference: pay.reference || undefined }),
       'Payment recorded',
     );
-    setPay({ method: 'cash', amount: '', reference: '' });
+    if (ok) setPay({ method: 'cash', amount: '', reference: '' });
     await load();
   }
 
   async function doRefund() {
-    await act.run(
+    const ok = await act.run(
       () => post(`/api/invoices/${id}/refund`, {
         amountPkr: Number(refund.amount),
         reason: refund.reason,
@@ -125,21 +125,23 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
       }),
       'Refund recorded',
     );
-    setRefund({ amount: '', reason: '', user: '', pass: '' });
-    setShowRefund(false);
+    if (ok) {
+      setRefund({ amount: '', reason: '', user: '', pass: '' });
+      setShowRefund(false);
+    }
     await load();
   }
 
   async function doVoid() {
-    await act.run(
+    const ok = await act.run(
       () => post(`/api/invoices/${id}/void`, { reason: voidForm.reason, approver: { username: voidForm.user, password: voidForm.pass } }),
       'Invoice voided',
     );
-    setShowVoid(false);
+    if (ok) setShowVoid(false);
     await load();
   }
 
-  if (!inv) return <p className="muted">Loading invoice...</p>;
+  if (!inv) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading invoice...</p>;
   const canWrite = s.can('billing.write');
   return (
     <>
@@ -161,7 +163,7 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
           />
           <dl className="kv">
             <dt>Subtotal</dt><dd>{pkr(inv.subtotalPkr)}</dd>
-            <dt>Discount{inv.discountReason ? ` (${inv.discountReason})` : ''}</dt><dd>-{pkr(inv.discountPkr)}</dd>
+            <dt>Discount{inv.discountReason ? ` (${inv.discountReason})` : ''}</dt><dd>{inv.discountPkr > 0 ? `-${pkr(inv.discountPkr)}` : pkr(0)}</dd>
             <dt>Tax</dt><dd>{pkr(inv.taxPkr)}</dd>
             <dt><strong>Total</strong></dt><dd><strong>{pkr(inv.totalPkr)}</strong></dd>
             <dt>Paid</dt><dd>{pkr(inv.paidPkr)}</dd>
@@ -255,7 +257,7 @@ function DailyClosing({ s }: { s: Session }) {
     await load();
   }
 
-  if (!data) return <p className="muted">Loading...</p>;
+  if (!data) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading...</p>;
   return (
     <Panel title="End-of-day cash reconciliation">
       <div className="toolbar-right">

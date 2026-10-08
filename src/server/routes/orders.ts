@@ -3,11 +3,12 @@ import type { Router } from '../http.ts';
 import { RawResponse, arr, badRequest, bool, conflict, forbidden, int, intParam, intQuery, invalid, json, notFound, oneOf, optStr, str } from '../http.ts';
 import { audit } from '../audit.ts';
 import { requirePerm, visibleBranches, assertBranch, type AuthUser } from '../security.ts';
-import { nextSequence, pad, businessDate, nowIso, toPaisa } from '../util.ts';
+import { nextSequence, pad, businessDate, nowIso, toPaisa, dayStartUtc, dayEndUtc } from '../util.ts';
 import { patientVisible } from './patients.ts';
 import { computeInvoice, invoiceNumber } from '../services/billing-core.ts';
 import { priceFor } from '../services/pricing.ts';
 import { specimenLabelSvg } from '../services/labels.ts';
+import { completeOrderIfDone } from './results.ts';
 
 const PRIORITIES = ['routine', 'urgent', 'stat'] as const;
 // Print pages carry a small inline script that opens the print dialog. Nothing else is allowed.
@@ -98,7 +99,11 @@ export function registerOrders(r: Router, db: DatabaseSync) {
 
     const payment = b.payment && typeof b.payment === 'object' ? (b.payment as Record<string, any>) : null;
     const paidPaisa = payment ? toPaisa(Number(payment.amountPkr ?? 0)) : 0;
+    if (!Number.isFinite(paidPaisa)) throw invalid('Payment amount must be a number');
     if (paidPaisa < 0 || paidPaisa > totals.total) throw invalid('Initial payment cannot exceed the invoice total');
+    if (paidPaisa > 0 && payment && payment.method !== 'cash' && !optStr(payment, 'reference', 80)) {
+      throw invalid('A reference number is required for non-cash payments');
+    }
 
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -157,6 +162,7 @@ export function registerOrders(r: Router, db: DatabaseSync) {
         ).run(invoiceId, l.testId, l.description, l.unitPricePaisa, l.taxRateBp, totals.taxByLine[i]!, l.unitPricePaisa + totals.taxByLine[i]!);
       });
 
+      if (totals.total === 0) db.prepare("UPDATE invoices SET status = 'paid' WHERE id = ?").run(invoiceId);
       if (paidPaisa > 0 && payment) {
         const method = oneOf(payment, 'method', ['cash', 'card', 'bank_transfer', 'jazzcash', 'easypaisa'] as const);
         db.prepare(
@@ -210,8 +216,8 @@ export function registerOrders(r: Router, db: DatabaseSync) {
     }
     const date = q.get('date');
     if (date) {
-      where.push("substr(o.created_at, 1, 10) = ?");
-      vals.push(date);
+      where.push('o.created_at >= ? AND o.created_at < ?');
+      vals.push(dayStartUtc(date), dayEndUtc(date));
     }
     const patientId = intQuery(q, 'patientId');
     if (patientId) {
@@ -304,11 +310,66 @@ export function registerOrders(r: Router, db: DatabaseSync) {
     return specimenDto(db, sp.id);
   });
 
+  // A rejected specimen can be recollected later: a new accession is issued for the tests still waiting on it.
+  r.post('/api/specimens/:id/recollect', (ctx) => {
+    const actor = ctx.user!;
+    requirePerm(actor, 'specimens.write');
+    const sp = loadSpecimen(db, actor, intParam(ctx.params.id!, 'id'));
+    if (sp.status !== 'rejected') throw conflict('Only a rejected specimen can be recollected');
+    const waiting = db.prepare("SELECT COUNT(*) AS n FROM order_items WHERE specimen_id = ? AND status = 'ordered'").get(sp.id) as { n: number };
+    if (waiting.n === 0) throw conflict('No tests are waiting on this specimen');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const accession = `${sp.branch_code}-S${pad(nextSequence(db, `accession:${sp.branch_code}`), 7)}`;
+      const created = db
+        .prepare(`INSERT INTO specimens (branch_id, order_id, accession_no, specimen_type, status) VALUES (?, ?, ?, ?, 'expected') RETURNING id`)
+        .get(sp.branch_id, sp.order_id, accession, sp.specimen_type) as { id: number };
+      db.prepare("UPDATE order_items SET specimen_id = ? WHERE specimen_id = ? AND status = 'ordered'").run(created.id, sp.id);
+      db.prepare('UPDATE specimens SET recollect_required = 1 WHERE id = ?').run(sp.id);
+      audit(db, { actor, branchId: sp.branch_id, action: 'specimen.recollect', entity: 'specimen', entityId: sp.id, after: { newSpecimenId: created.id, accession } });
+      db.exec('COMMIT');
+      return json(specimenDto(db, created.id), 201);
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  });
+
+  // Cancels one test on an order (e.g. specimen could not be recollected). Billing is refunded separately.
+  r.post('/api/order-items/:id/cancel', async (ctx) => {
+    const actor = ctx.user!;
+    requirePerm(actor, 'orders.write');
+    const itemId = intParam(ctx.params.id!, 'id');
+    const item = db
+      .prepare('SELECT oi.id, oi.status, oi.order_id, o.branch_id FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.id = ?')
+      .get(itemId) as { id: number; status: string; order_id: number; branch_id: number } | undefined;
+    if (!item) throw notFound('Test not found on any order');
+    assertBranch(actor, item.branch_id);
+    if (item.status === 'completed' || item.status === 'cancelled') throw conflict(`This test is already ${item.status}`);
+    const reason = str(ctx.body, 'reason', { max: 300, min: 5 });
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare("UPDATE order_items SET status = 'cancelled' WHERE id = ?").run(itemId);
+      db.prepare("UPDATE results SET status = 'cancelled', cancel_reason = ? WHERE order_item_id = ? AND status <> 'authorized'").run(reason, itemId);
+      audit(db, { actor, branchId: item.branch_id, action: 'order_item.cancel', entity: 'order_item', entityId: itemId, after: { reason } });
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    const done = await completeOrderIfDone(db, actor, item.order_id);
+    return json({ ok: true, orderCompleted: done.completed, report: done.report });
+  });
+
   r.post('/api/specimens/:id/store', (ctx) => {
     const actor = ctx.user!;
     requirePerm(actor, 'specimens.write');
     const sp = loadSpecimen(db, actor, intParam(ctx.params.id!, 'id'));
     if (!['received', 'processing'].includes(sp.status)) throw conflict(`Specimen is ${sp.status}`);
+    const open = db
+      .prepare("SELECT COUNT(*) AS n FROM order_items WHERE specimen_id = ? AND status NOT IN ('completed','cancelled')")
+      .get(sp.id) as { n: number };
+    if (open.n > 0) throw conflict('Finish (authorize or cancel) every test on this specimen before storing or disposing of it');
     const disposition = oneOf(ctx.body, 'disposition', ['stored', 'disposed'] as const);
     db.prepare('UPDATE specimens SET status = ?, stored_at = ? WHERE id = ?').run(disposition, nowIso(), sp.id);
     audit(db, { actor, branchId: sp.branch_id, action: `specimen.${disposition}`, entity: 'specimen', entityId: sp.id });
@@ -377,8 +438,8 @@ export function registerOrders(r: Router, db: DatabaseSync) {
     }
     const date = q.get('date');
     if (date) {
-      where.push('substr(o.created_at, 1, 10) = ?');
-      vals.push(date);
+      where.push('o.created_at >= ? AND o.created_at < ?');
+      vals.push(dayStartUtc(date), dayEndUtc(date));
     }
     const rows = db
       .prepare(

@@ -107,7 +107,7 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
   });
 
   r.get('/api/catalog/tests', (ctx) => {
-    requirePerm(ctx.user!, 'catalog.read');
+    if (!ctx.user!.perms.has('orders.write')) requirePerm(ctx.user!, 'catalog.read');
     const q = (ctx.query.get('q') ?? '').trim();
     const dept = ctx.query.get('department');
     const includeInactive = ctx.query.get('all') === '1';
@@ -169,6 +169,7 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
     if (db.prepare('SELECT id FROM tests WHERE code = ?').get(code)) throw conflict('Test code already exists');
     const isPanel = bool(b, 'isPanel');
     const members = isPanel && Array.isArray(b.memberTestIds) ? (b.memberTestIds as unknown[]).map((x) => Number(x)) : [];
+    if (isPanel && members.length === 0) throw invalid('A panel needs at least one member test');
 
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -342,6 +343,19 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
     return { ok: true, status: 'approved' };
   });
 
+  // Starter ranges are loaded as usable but unverified; a pathologist confirms them here (recorded with name and time).
+  r.post('/api/catalog/ranges/:id/verify', (ctx) => {
+    const actor = ctx.user!;
+    requirePerm(actor, 'catalog.approve_ranges');
+    const id = intParam(ctx.params.id!, 'id');
+    const row = db.prepare('SELECT status, approved_by FROM reference_ranges WHERE id = ?').get(id) as { status: string; approved_by: number | null } | undefined;
+    if (!row) throw notFound('Range not found');
+    if (row.status !== 'approved' || row.approved_by != null) throw conflict('Only unverified starter ranges can be verified');
+    db.prepare("UPDATE reference_ranges SET approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(actor.id, id);
+    audit(db, { actor, action: 'range.verify', entity: 'reference_range', entityId: id });
+    return { ok: true };
+  });
+
   r.post('/api/catalog/tests/:id/prices', (ctx) => {
     const actor = ctx.user!;
     requirePerm(actor, 'catalog.write');
@@ -495,11 +509,16 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
         const text = get('text_range') || null;
         if (low == null && high == null && !text) continue;
         const sex = (get('sex') || 'A').toUpperCase();
+        const ageMin = Number(get('age_min_days') || 0);
+        const ageMax = Number(get('age_max_days') || 36500);
+        if (!['A', 'M', 'F'].includes(sex) || !Number.isInteger(ageMin) || !Number.isInteger(ageMax) || ageMin < 0 || ageMax < ageMin) {
+          throw badRequest(`Test ${testCode} / ${paramCode}: sex must be A, M or F and age days must be whole numbers (min <= max)`);
+        }
         const version = (db.prepare('SELECT COALESCE(MAX(version), 0) AS v FROM reference_ranges WHERE parameter_id = ?').get(param.id) as { v: number }).v + 1;
         db.prepare(
           `INSERT INTO reference_ranges (parameter_id, sex, age_min_days, age_max_days, low, high, text_range, status, version, note, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, 'CSV import', ?)`,
-        ).run(param.id, sex, Number(get('age_min_days') || 0), Number(get('age_max_days') || 36500), low, high, text, version, actor.id);
+        ).run(param.id, sex, ageMin, ageMax, low, high, text, version, actor.id);
       }
       audit(db, { actor, action: 'catalog.import', entity: 'catalog', after: { rows: parsed.length, testsCreated: created } });
       db.exec('COMMIT');

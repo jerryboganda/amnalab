@@ -14,6 +14,8 @@ import {
   rangeLabel,
   saveEntries,
   type Entry,
+  amendResult,
+  missingParameters,
 } from '../services/results-core.ts';
 import { selectRange } from '../services/flags.ts';
 import { generateReportForOrder } from '../services/reports.ts';
@@ -98,9 +100,11 @@ export function registerResults(r: Router, db: DatabaseSync) {
     const rows = db
       .prepare("SELECT id, status, entered_by FROM results WHERE order_item_id = ? AND status <> 'cancelled'")
       .all(itemId) as Array<{ id: number; status: string; entered_by: number | null }>;
+    // Only draft rows are reviewed; already authorized siblings (after an amendment) stay as they are.
+    const drafts = rows.filter((x) => x.status === 'draft');
     if (rows.length === 0) throw conflict('No results have been entered yet');
-    if (rows.some((x) => x.entered_by === user.id)) throw conflict('Technical review must be done by a different person from the one who entered the results');
-    if (rows.some((x) => x.status === 'authorized')) throw conflict('Some results are already authorized');
+    if (drafts.length === 0) throw conflict('Nothing is waiting for review');
+    if (drafts.some((x) => x.entered_by === user.id)) throw conflict('Technical review must be done by a different person from the one who entered the results');
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare("UPDATE results SET status = 'reviewed', reviewed_by = ?, reviewed_at = ? WHERE order_item_id = ? AND status = 'draft'").run(
@@ -128,12 +132,15 @@ export function registerResults(r: Router, db: DatabaseSync) {
         `SELECT id, status, entered_by, reviewed_by, critical FROM results WHERE order_item_id = ? AND status <> 'cancelled'`,
       )
       .all(itemId) as Array<{ id: number; status: string; entered_by: number | null; reviewed_by: number | null; critical: number }>;
-    if (rows.length === 0) throw conflict('No results to authorize');
-    if (rows.some((x) => x.status !== 'reviewed')) throw conflict('Every result must be technically reviewed before authorization');
-    if (rows.some((x) => x.entered_by === user.id)) {
+    const pending = rows.filter((x) => x.status === 'reviewed');
+    if (rows.length === 0 || pending.length === 0) throw conflict('No reviewed results to authorize');
+    if (rows.some((x) => x.status === 'draft')) throw conflict('Every result must be technically reviewed before authorization');
+    const missing = missingParameters(db, itemId, item.test_id);
+    if (missing.length > 0) throw conflict(`Results are missing for: ${missing.join(', ')}`);
+    if (pending.some((x) => x.entered_by === user.id)) {
       throw conflict('The person who entered a result cannot authorize it');
     }
-    const criticals = rows.filter((x) => x.critical === 1);
+    const criticals = pending.filter((x) => x.critical === 1);
     let notifiedTo: string | null = null;
     if (criticals.length > 0) {
       notifiedTo = str(ctx.body, 'criticalNotifiedTo', { max: 160, min: 2 });
@@ -152,7 +159,7 @@ export function registerResults(r: Router, db: DatabaseSync) {
         action: 'result.authorize',
         entity: 'order_item',
         entityId: itemId,
-        after: { results: rows.length, criticals: criticals.length, criticalNotifiedTo: notifiedTo },
+        after: { results: pending.length, criticals: criticals.length, criticalNotifiedTo: notifiedTo },
       });
       db.exec('COMMIT');
     } catch (err) {
@@ -160,7 +167,7 @@ export function registerResults(r: Router, db: DatabaseSync) {
       throw err;
     }
     const orderDone = await completeOrderIfDone(db, user, item.order_id);
-    return json({ ...itemView(db, user, itemId), orderCompleted: orderDone.completed, report: orderDone.report });
+    return json({ ...itemView(db, user, itemId), orderCompleted: orderDone.completed, report: orderDone.report, reportError: orderDone.reportError ?? null });
   });
 
   // Amendment of an authorized result. Keeps the previous value in revisions; the report is re-issued on re-authorization.
@@ -168,46 +175,15 @@ export function registerResults(r: Router, db: DatabaseSync) {
     const user = ctx.user!;
     requirePerm(user, 'results.amend');
     const resultId = intParam(ctx.params.id!, 'id');
-    const row = db
-      .prepare(
-        `SELECT r.*, oi.order_id FROM results r JOIN order_items oi ON oi.id = r.order_item_id WHERE r.id = ?`,
-      )
-      .get(resultId) as Record<string, any> | undefined;
+    const row = db.prepare('SELECT value_numeric FROM results WHERE id = ?').get(resultId) as { value_numeric: number | null } | undefined;
     if (!row) throw notFound('Result not found');
-    loadItem(db, user, Number(row.order_item_id));
-    if (row.status !== 'authorized') throw conflict('Only authorized results are amended');
     const reason = str(ctx.body, 'reason', { max: 300, min: 5 });
     const isText = row.value_numeric === null;
-    const newNum = isText ? null : num(ctx.body, 'valueNumeric');
-    const newText = isText ? str(ctx.body, 'valueText', { max: 300 }) : null;
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      db.prepare(
-        `INSERT INTO result_revisions (result_id, version, value_numeric, value_text, flag, status, changed_by, reason)
-         VALUES (?, ?, ?, ?, ?, 'authorized', ?, ?)`,
-      ).run(resultId, row.version, row.value_numeric, row.value_text, row.flag, user.id, reason);
-      db.prepare(
-        `UPDATE results SET value_numeric = ?, value_text = ?, status = 'draft', version = version + 1,
-                entered_by = ?, entered_at = ?, reviewed_by = NULL, reviewed_at = NULL, authorized_by = NULL, authorized_at = NULL
-         WHERE id = ?`,
-      ).run(newNum, newText, user.id, nowIso(), resultId);
-      db.prepare("UPDATE order_items SET status = 'processing', completed_at = NULL WHERE id = ?").run(row.order_item_id);
-      db.prepare("UPDATE orders SET status = 'in_progress' WHERE id = ?").run(row.order_id);
-      audit(db, {
-        actor: user,
-        branchId: Number(row.branch_id),
-        action: 'result.amend',
-        entity: 'result',
-        entityId: resultId,
-        before: { value_numeric: row.value_numeric, value_text: row.value_text, version: row.version },
-        after: { value_numeric: newNum, value_text: newText, reason },
-      });
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
-    return json({ ok: true, version: Number(row.version) + 1, status: 'draft' });
+    const value = isText
+      ? { num: null, text: str(ctx.body, 'valueText', { max: 300 }) }
+      : { num: num(ctx.body, 'valueNumeric'), text: null };
+    const out = amendResult(db, user, resultId, value, reason);
+    return json({ ok: true, version: out.version, status: 'draft' });
   });
 
   r.post('/api/results/:id/cancel', (ctx) => {
@@ -244,6 +220,9 @@ export function registerResults(r: Router, db: DatabaseSync) {
 
   r.get('/api/attachments/:id', (ctx) => {
     const user = ctx.user!;
+    if (!['results.enter', 'results.review', 'results.authorize', 'reports.read'].some((p) => user.perms.has(p as never))) {
+      throw forbidden('attachments');
+    }
     const id = intParam(ctx.params.id!, 'id');
     const row = db.prepare('SELECT order_item_id, path, mime, filename FROM attachments WHERE id = ?').get(id) as
       | { order_item_id: number; path: string; mime: string; filename: string }
@@ -262,15 +241,25 @@ export async function completeOrderIfDone(
   db: DatabaseSync,
   actor: AuthUser,
   orderId: number,
-): Promise<{ completed: boolean; report: unknown }> {
+): Promise<{ completed: boolean; report: unknown; reportError?: string }> {
   const open = db
     .prepare("SELECT COUNT(*) AS n FROM order_items WHERE order_id = ? AND status NOT IN ('completed','cancelled')")
     .get(orderId) as { n: number };
   if (open.n > 0) return { completed: false, report: null };
+  const live = db.prepare("SELECT COUNT(*) AS n FROM order_items WHERE order_id = ? AND status <> 'cancelled'").get(orderId) as { n: number };
+  if (live.n === 0) {
+    db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?").run(orderId);
+    return { completed: false, report: null };
+  }
   db.prepare("UPDATE orders SET status = 'completed' WHERE id = ?").run(orderId);
-  const items = db.prepare('SELECT id FROM order_items WHERE order_id = ?').all(orderId) as Array<{ id: number }>;
+  const items = db.prepare("SELECT id FROM order_items WHERE order_id = ? AND status <> 'cancelled'").all(orderId) as Array<{ id: number }>;
   const allAuthorized = items.every((i) => itemHasAuthorizedAll(db, i.id));
   if (!allAuthorized) return { completed: true, report: null };
-  const report = await generateReportForOrder(db, actor, orderId, null);
-  return { completed: true, report: { id: report.id, reportNo: report.reportNo, version: report.version } };
+  try {
+    const report = await generateReportForOrder(db, actor, orderId, null);
+    return { completed: true, report: { id: report.id, reportNo: report.reportNo, version: report.version } };
+  } catch (err) {
+    console.error('Report generation failed for order', orderId, err);
+    return { completed: true, report: null, reportError: (err as Error).message };
+  }
 }

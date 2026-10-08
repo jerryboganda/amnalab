@@ -3,7 +3,7 @@ import type { Router } from '../http.ts';
 import { RawResponse, badRequest, conflict, int, intParam, intQuery, invalid, json, notFound, num, oneOf, optStr, str } from '../http.ts';
 import { audit } from '../audit.ts';
 import { assertBranch, requirePerm, visibleBranches, type AuthUser } from '../security.ts';
-import { businessDate, fmtPkr, fromPaisa, nowIso, toPaisa } from '../util.ts';
+import { businessDate, dayEndUtc, dayStartUtc, fmtPkr, fromPaisa, nowIso, toPaisa } from '../util.ts';
 import { verifyApprover } from '../services/approval.ts';
 import { PRINT_CSP } from './orders.ts';
 
@@ -59,8 +59,15 @@ function refreshInvoice(db: DatabaseSync, invoiceId: number): void {
     | undefined;
   if (!inv || inv.status === 'void') return;
   const net = inv.paid_paisa - inv.refunded_paisa;
-  const status = net <= 0 ? 'issued' : net >= inv.total_paisa ? 'paid' : 'partially_paid';
+  const status = net >= inv.total_paisa ? 'paid' : net <= 0 ? 'issued' : 'partially_paid';
   db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, invoiceId);
+}
+
+// Once a cash day is closed, no more money can be recorded against it.
+function assertDayOpen(db: DatabaseSync, branchId: number, date: string): void {
+  if (db.prepare('SELECT id FROM cash_closings WHERE branch_id = ? AND business_date = ?').get(branchId, date)) {
+    throw conflict('Today has already been closed for this branch. Ask a branch manager.');
+  }
 }
 
 function closingFigures(db: DatabaseSync, branchId: number, date: string) {
@@ -103,12 +110,12 @@ export function registerBilling(r: Router, db: DatabaseSync) {
       vals.push(q.get('status')!);
     }
     if (q.get('from')) {
-      where.push('substr(i.created_at,1,10) >= ?');
-      vals.push(q.get('from')!);
+      where.push('i.created_at >= ?');
+      vals.push(dayStartUtc(q.get('from')!));
     }
     if (q.get('to')) {
-      where.push('substr(i.created_at,1,10) <= ?');
-      vals.push(q.get('to')!);
+      where.push('i.created_at < ?');
+      vals.push(dayEndUtc(q.get('to')!));
     }
     const sql = `SELECT i.id, i.invoice_no, i.order_id, i.total_paisa, i.paid_paisa, i.refunded_paisa, i.status, i.created_at, p.full_name AS patient_name, b.code AS branch_code
                  FROM invoices i JOIN patients p ON p.id = i.patient_id JOIN branches b ON b.id = i.branch_id
@@ -142,6 +149,7 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     if (method !== 'cash' && !reference) throw invalid('A reference number is required for non-cash payments');
     const branch = db.prepare('SELECT timezone FROM branches WHERE id = ?').get(Number(inv.branch_id)) as { timezone: string };
     const date = businessDate(branch.timezone);
+    assertDayOpen(db, Number(inv.branch_id), date);
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare(
@@ -172,12 +180,14 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     const approver = verifyApprover(db, actor, ctx.body.approver, 'billing.approve_refund');
     const method = oneOf(ctx.body, 'method', METHODS, false) || 'cash';
     const branch = db.prepare('SELECT timezone FROM branches WHERE id = ?').get(Number(inv.branch_id)) as { timezone: string };
+    const refundDate = businessDate(branch.timezone);
+    assertDayOpen(db, Number(inv.branch_id), refundDate);
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare(
         `INSERT INTO payments (invoice_id, branch_id, kind, method, amount_paisa, reason, received_by, approved_by, business_date)
          VALUES (?, ?, 'refund', ?, ?, ?, ?, ?, ?)`,
-      ).run(id, Number(inv.branch_id), method, amount, reason, actor.id, approver.id, businessDate(branch.timezone));
+      ).run(id, Number(inv.branch_id), method, amount, reason, actor.id, approver.id, refundDate);
       db.prepare('UPDATE invoices SET refunded_paisa = refunded_paisa + ? WHERE id = ?').run(amount, id);
       refreshInvoice(db, id);
       audit(db, { actor, branchId: Number(inv.branch_id), action: 'payment.refund', entity: 'invoice', entityId: id, after: { amountPkr: fromPaisa(amount), reason, approvedBy: approver.username } });
@@ -232,7 +242,7 @@ export function registerBilling(r: Router, db: DatabaseSync) {
       <div>Patient: ${esc(dto.patient.name)} (${esc(dto.patient.mrn)})</div>
       <div class="b"></div><table>${lines}</table><div class="b"></div>
       <table><tr><td>Subtotal</td><td style="text-align:right">${fmtPkr(toPaisa(dto.subtotalPkr))}</td></tr>
-      <tr><td>Discount${dto.discountReason ? ` (${esc(dto.discountReason)})` : ''}</td><td style="text-align:right">-${fmtPkr(toPaisa(dto.discountPkr))}</td></tr>
+      <tr><td>Discount${dto.discountReason ? ` (${esc(dto.discountReason)})` : ''}</td><td style="text-align:right">${dto.discountPkr > 0 ? "-" : ""}${fmtPkr(toPaisa(dto.discountPkr))}</td></tr>
       <tr><td>Tax</td><td style="text-align:right">${fmtPkr(toPaisa(dto.taxPkr))}</td></tr>
       <tr><td><b>Total (PKR)</b></td><td style="text-align:right"><b>${fmtPkr(toPaisa(dto.totalPkr))}</b></td></tr></table>
       <div class="b"></div><table>${pays}</table>
@@ -249,7 +259,8 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     const branchId = intQuery(ctx.query, 'branchId');
     if (!branchId) throw badRequest('branchId is required');
     assertBranch(user, branchId);
-    const date = ctx.query.get('date') ?? businessDate('Asia/Karachi');
+    const tz = (db.prepare('SELECT timezone FROM branches WHERE id = ?').get(branchId) as { timezone: string } | undefined)?.timezone ?? 'Asia/Karachi';
+    const date = ctx.query.get('date') ?? businessDate(tz);
     const figures = closingFigures(db, branchId, date);
     const closing = db.prepare('SELECT * FROM cash_closings WHERE branch_id = ? AND business_date = ?').get(branchId, date) ?? null;
     return {
@@ -268,6 +279,8 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     assertBranch(actor, branchId);
     const date = str(ctx.body, 'date', { max: 10, min: 10 });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw invalid('date must be YYYY-MM-DD');
+    const tz = (db.prepare('SELECT timezone FROM branches WHERE id = ?').get(branchId) as { timezone: string } | undefined)?.timezone ?? 'Asia/Karachi';
+    if (date > businessDate(tz)) throw invalid('A future day cannot be closed');
     if (db.prepare('SELECT id FROM cash_closings WHERE branch_id = ? AND business_date = ?').get(branchId, date)) {
       throw conflict('This day is already closed');
     }

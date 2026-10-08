@@ -195,6 +195,52 @@ try {
   assert.equal(verify.json.valid, true);
   passed++;
 
+  step('amendment: amend -> review -> re-authorize issues an amended version 2');
+  assert.equal((await admin('POST', '/api/admin/users', { username: 'drsana', fullName: 'Dr Sana', role: 'pathologist', password: 'Path-Pass-2027', branchIds: [branchId] })).status, 201);
+  const drsana = client();
+  assert.equal((await drsana('POST', '/api/auth/login', { username: 'drsana', password: 'Path-Pass-2027' })).status, 200);
+  const hgb = (await pathologist('GET', `/api/order-items/${cbcItem.id}`)).json.parameters.find((p) => p.code === 'HGB');
+  const amended = await pathologist('POST', `/api/results/${hgb.result.id}/amend`, { valueNumeric: 6.5, reason: 'Transcription error corrected' });
+  assert.equal(amended.status, 200, JSON.stringify(amended.json));
+  const afterAmend = (await pathologist('GET', `/api/order-items/${cbcItem.id}`)).json.parameters.find((p) => p.code === 'HGB');
+  assert.equal(afterAmend.result.flag, 'LL', 'amended value must be re-flagged (critical low)');
+  assert.equal((await pathologist('POST', `/api/order-items/${cbcItem.id}/review`)).status, 409, 'the amending person cannot review it');
+  assert.equal((await tech('POST', `/api/order-items/${cbcItem.id}/review`)).status, 200);
+  assert.equal((await drsana('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 422, 'critical value needs a notification record');
+  const reauth = await drsana('POST', `/api/order-items/${cbcItem.id}/authorize`, { criticalNotifiedTo: 'Dr Imran (ER), 10:15' });
+  assert.equal(reauth.status, 200, JSON.stringify(reauth.json));
+  assert.equal(reauth.json.report?.version, 2);
+  const v2 = (await admin('GET', `/api/orders/${orderId}/reports`)).json;
+  assert.equal(v2.filter((r) => r.status === 'final').length, 1);
+  assert.equal(v2.find((r) => r.version === 1).status, 'superseded');
+  passed++;
+
+  step('incomplete results cannot be authorized; reject -> recollect; cancel test');
+  const order2 = (await reception('POST', '/api/orders', { branchId, patientId, testIds: [cbc.id, fbs.id] })).json;
+  const cbc2 = order2.items.find((i) => i.test_id === cbc.id);
+  const fbs2 = order2.items.find((i) => i.test_id === fbs.id);
+  const edtaSpec = order2.specimens.find((x) => x.id === cbc2.specimen_id);
+  const fluSpec = order2.specimens.find((x) => x.id === fbs2.specimen_id);
+  await collector('POST', `/api/specimens/${edtaSpec.id}/collect`, { collectorName: 'Bilal' });
+  await tech('POST', `/api/specimens/${edtaSpec.id}/receive`);
+  const view2 = (await tech('GET', `/api/order-items/${cbc2.id}`)).json;
+  const hgbParam = view2.parameters.find((p) => p.code === 'HGB');
+  assert.equal((await tech('POST', `/api/order-items/${cbc2.id}/results`, { values: [{ parameterId: hgbParam.id, valueNumeric: 13 }] })).status, 200);
+  assert.equal((await pathologist('POST', `/api/order-items/${cbc2.id}/review`)).status, 200);
+  const partial = await drsana('POST', `/api/order-items/${cbc2.id}/authorize`);
+  assert.equal(partial.status, 409, 'authorizing with missing parameters must fail');
+  assert.match(partial.json.message, /missing/i);
+  await collector('POST', `/api/specimens/${fluSpec.id}/collect`, { collectorName: 'Bilal' });
+  assert.equal((await tech('POST', `/api/specimens/${fluSpec.id}/reject`, { reason: 'Haemolysed sample', recollect: false })).status, 200);
+  const re = await tech('POST', `/api/specimens/${fluSpec.id}/recollect`);
+  assert.equal(re.status, 201, JSON.stringify(re.json));
+  assert.equal(re.json.status, 'expected');
+  const cancel = await reception('POST', `/api/order-items/${fbs2.id}/cancel`, { reason: 'Patient left before recollection' });
+  assert.equal(cancel.status, 200, JSON.stringify(cancel.json));
+  const o2 = (await admin('GET', `/api/orders/${order2.id}`)).json;
+  assert.equal(o2.items.find((i) => i.id === fbs2.id).status, 'cancelled');
+  passed++;
+
   step('billing: balance, payment, receipt and daily closing');
   const inv = (await admin('GET', `/api/invoices/${order.json.invoice.id}`)).json;
   assert.ok(inv.balancePkr > 0);
@@ -221,7 +267,7 @@ try {
   passed++;
 
   step('messages: WhatsApp is staff-operated and needs consent');
-  const reportId = reports[0].id;
+  const reportId = (await admin('GET', `/api/orders/${orderId}/reports`)).json.find((r) => r.status === 'final').id;
   const wa = await reception('POST', `/api/reports/${reportId}/send`, { channel: 'whatsapp' });
   assert.equal(wa.status, 201, JSON.stringify(wa.json));
   assert.match(wa.json.waUrl, /^https:\/\/wa\.me\/92300/);
