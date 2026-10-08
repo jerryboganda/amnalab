@@ -1,0 +1,37 @@
+{
+  "name": "amna-lab-lms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ultralight laboratory management system for one PC (Node + SQLite + React)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/build-server.mjs",
+    "start": "node dist/server/index.js",
+    "restore": "node dist/server/restore.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/unit/*.test.ts\"",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run typecheck && npm run build && npm test && npm run smoke"
+  },
+  "dependencies": {
+    "@formepdf/core": "^0.28.0",
+    "@formepdf/react": "^0.28.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}

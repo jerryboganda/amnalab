@@ -1,0 +1,13 @@
+node_modules/
+dist/
+data/
+backups/
+.env
+*.db
+*.db-wal
+*.db-shm
+*.lmsbak
+*.log
+coverage/
+# Client-owned source documents are not published to the public repo
+*.docx
