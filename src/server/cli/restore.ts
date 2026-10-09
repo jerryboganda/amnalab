@@ -18,7 +18,13 @@ if (!passphrase) {
   process.exit(1);
 }
 
-const plain = decryptBuffer(readFileSync(file), passphrase);
+let plain: Buffer;
+try {
+  plain = decryptBuffer(readFileSync(file), passphrase);
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(1);
+}
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 
 if (existsSync(config.dbFile)) {
