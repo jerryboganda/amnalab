@@ -4,7 +4,7 @@ import { evaluate, validateFormula } from '../../src/server/services/formula.ts'
 import { flagNumeric, selectRange, type RangeRow } from '../../src/server/services/flags.ts';
 import { parseCsv, toCsv } from '../../src/server/services/csv.ts';
 import { hashPassword, passwordProblem, verifyPassword } from '../../src/server/security.ts';
-import { encryptBuffer, decryptBuffer } from '../../src/server/services/backup.ts';
+import { encryptBuffer, decryptBuffer, packArchive, unpackArchive, restoreArchive } from '../../src/server/services/backup.ts';
 import { ageInYears, toPaisa, fmtPkr } from '../../src/server/util.ts';
 import { normalizePkPhone, whatsappLink } from '../../src/server/services/notify.ts';
 
@@ -88,4 +88,15 @@ test('lab day boundaries use Pakistan time and timezones are validated', async (
   assert.equal(dayEndUtc('2026-10-08'), '2026-10-08T19:00:00.000Z');
   assert.equal(isValidTimezone('Asia/Karachi'), true);
   assert.equal(isValidTimezone('Mars/Olympus'), false);
+});
+
+test('backup archive: files round-trip and unsafe paths are refused', () => {
+  const entries = [
+    { path: 'lms.db', data: Buffer.from('db-bytes') },
+    { path: 'files/reports/R1.pdf', data: Buffer.from('%PDF-x') },
+  ];
+  const back = unpackArchive(packArchive(entries));
+  assert.deepEqual(back.map((e) => [e.path, e.data.toString()]), entries.map((e) => [e.path, e.data.toString()]));
+  const evil = packArchive([{ path: 'lms.db', data: Buffer.from('x') }, { path: 'files/../../escape.txt', data: Buffer.from('x') }]);
+  assert.throws(() => restoreArchive(evil, false), /unsafe file path/);
 });
