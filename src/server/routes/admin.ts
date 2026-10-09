@@ -5,7 +5,11 @@ import { RawResponse, arr, badRequest, bool, conflict, forbidden, int, intParam,
 import { audit } from '../audit.ts';
 import { hashPassword, passwordProblem, ROLES, requirePerm, type AuthUser, type Role } from '../security.ts';
 import { getSettings, setSetting, type Settings } from '../services/settings.ts';
-import { readIfExists, saveBrandingImage } from '../services/files.ts';
+import { readIfExists, saveBrandingImage, saveUserSignature } from '../services/files.ts';
+import { branchDesign } from '../services/doc-branch.ts';
+import { sampleInvoice, sampleReport } from '../services/sample-docs.ts';
+import { renderReportPdf } from '../services/report-pdf.tsx';
+import { renderInvoicePdf } from '../services/invoice-pdf.tsx';
 import { toCsv } from '../services/csv.ts';
 import { createBackup, listBackups } from '../services/backup.ts';
 import { config } from '../config.ts';
@@ -19,9 +23,9 @@ import { branchesFor } from './auth.ts';
 
 function userRow(db: DatabaseSync, id: number) {
   const u = db
-    .prepare('SELECT id, username, full_name, role, is_active, locked_until, created_at FROM users WHERE id = ?')
+    .prepare('SELECT id, username, full_name, role, is_active, locked_until, created_at, qualifications, signature_path FROM users WHERE id = ?')
     .get(id) as
-    | { id: number; username: string; full_name: string; role: string; is_active: number; locked_until: string | null; created_at: string }
+    | { id: number; username: string; full_name: string; role: string; is_active: number; locked_until: string | null; created_at: string; qualifications: string | null; signature_path: string | null }
     | undefined;
   if (!u) return null;
   const branches = db
@@ -37,6 +41,8 @@ function userRow(db: DatabaseSync, id: number) {
     isActive: u.is_active === 1,
     lockedUntil: u.locked_until,
     createdAt: u.created_at,
+    qualifications: u.qualifications,
+    hasSignature: !!u.signature_path,
     branches,
   };
 }
@@ -112,6 +118,9 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
         if (!bool(b, 'isActive')) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
       }
       if (b.unlock === true) db.prepare('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?').run(id);
+      if (b.qualifications !== undefined) db.prepare('UPDATE users SET qualifications = ? WHERE id = ?').run(optStr(b, 'qualifications', 200), id);
+      if (b.signature) db.prepare('UPDATE users SET signature_path = ? WHERE id = ?').run(saveUserSignature(id, str(b, 'signature', { max: 6_000_000 })), id);
+      else if (b.signature === null) db.prepare('UPDATE users SET signature_path = NULL WHERE id = ?').run(id);
       if (b.password !== undefined) {
         const pw = str(b, 'password', { max: 200 });
         const problem = passwordProblem(pw);
@@ -226,7 +235,10 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     const row = db
       .prepare(
         `SELECT id, name, code, address, phone, email, whatsapp, motto, header_text, footer_text,
-                logo_path IS NOT NULL AS has_logo, background_path IS NOT NULL AS has_background
+                logo_path IS NOT NULL AS has_logo, background_path IS NOT NULL AS has_background,
+                brand_primary, brand_secondary, timings, disclaimer, incharge_name, incharge_title,
+                incharge_signature_path IS NOT NULL AS has_incharge_signature, letterhead_mode, letterhead_top_mm,
+                letterhead_bottom_mm, payment_details
          FROM branches WHERE id = ?`,
       )
       .get(id);
@@ -240,22 +252,40 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     const id = intParam(ctx.params.id!, 'id');
     if (actor.branchIds !== 'all' && !actor.branchIds.includes(id)) throw forbidden('this branch');
     const b = ctx.body;
-    const headerText = optStr(b, 'headerText', 600);
-    const footerText = optStr(b, 'footerText', 600);
-    const motto = optStr(b, 'motto', 200);
     const before = db.prepare('SELECT header_text, footer_text, motto FROM branches WHERE id = ?').get(id);
     if (!before) throw notFound('Branch not found');
-    db.prepare('UPDATE branches SET header_text = ?, footer_text = ?, motto = ? WHERE id = ?').run(
-      headerText,
-      footerText,
-      motto,
-      id,
-    );
+    // Every field is validated first and only changed when sent, so a partial or rejected save never wipes the others.
+    const color = (key: string) => {
+      const v = str(b, key, { max: 7 });
+      if (!/^#[0-9a-fA-F]{6}$/.test(v)) throw badRequest(`${key} must be a colour like #1F5FAE`);
+      return v.toUpperCase();
+    };
+    const sets: Array<[string, string | number | null]> = [];
+    if (b.headerText !== undefined) sets.push(['header_text', optStr(b, 'headerText', 600)]);
+    if (b.footerText !== undefined) sets.push(['footer_text', optStr(b, 'footerText', 600)]);
+    if (b.motto !== undefined) sets.push(['motto', optStr(b, 'motto', 200)]);
+    if (b.brandPrimary !== undefined) sets.push(['brand_primary', color('brandPrimary')]);
+    if (b.brandSecondary !== undefined) sets.push(['brand_secondary', color('brandSecondary')]);
+    if (b.timings !== undefined) sets.push(['timings', optStr(b, 'timings', 300)]);
+    if (b.disclaimer !== undefined) sets.push(['disclaimer', optStr(b, 'disclaimer', 800)]);
+    if (b.inchargeName !== undefined) sets.push(['incharge_name', optStr(b, 'inchargeName', 120)]);
+    if (b.inchargeTitle !== undefined) sets.push(['incharge_title', optStr(b, 'inchargeTitle', 160)]);
+    if (b.paymentDetails !== undefined) sets.push(['payment_details', optStr(b, 'paymentDetails', 600)]);
+    if (b.letterheadMode !== undefined) sets.push(['letterhead_mode', bool(b, 'letterheadMode') ? 1 : 0]);
+    if (b.letterheadTopMm !== undefined) sets.push(['letterhead_top_mm', int(b, 'letterheadTopMm', { min: 0, max: 120 })]);
+    if (b.letterheadBottomMm !== undefined) sets.push(['letterhead_bottom_mm', int(b, 'letterheadBottomMm', { min: 0, max: 120 })]);
+    for (const [col, v] of sets) db.prepare(`UPDATE branches SET ${col} = ? WHERE id = ?`).run(v, id);
     if (b.logo) {
       const path = saveBrandingImage(id, 'logo', str(b, 'logo', { max: 6_000_000 }));
       db.prepare('UPDATE branches SET logo_path = ? WHERE id = ?').run(path, id);
     } else if (b.logo === null) {
       db.prepare('UPDATE branches SET logo_path = NULL WHERE id = ?').run(id);
+    }
+    if (b.inchargeSignature) {
+      const path = saveBrandingImage(id, 'incharge-signature', str(b, 'inchargeSignature', { max: 6_000_000 }));
+      db.prepare('UPDATE branches SET incharge_signature_path = ? WHERE id = ?').run(path, id);
+    } else if (b.inchargeSignature === null) {
+      db.prepare('UPDATE branches SET incharge_signature_path = NULL WHERE id = ?').run(id);
     }
     if (b.background) {
       const path = saveBrandingImage(id, 'background', str(b, 'background', { max: 6_000_000 }));
@@ -263,8 +293,25 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     } else if (b.background === null) {
       db.prepare('UPDATE branches SET background_path = NULL WHERE id = ?').run(id);
     }
-    audit(db, { actor, branchId: id, action: 'template.update', entity: 'branch', entityId: id, before, after: { headerText, footerText, motto } });
+    audit(db, { actor, branchId: id, action: 'template.update', entity: 'branch', entityId: id, before, after: Object.fromEntries(sets) });
     return { ok: true };
+  });
+
+  // Sample report or invoice in this branch's current design, for the template screen.
+  r.get('/api/branches/:id/template/preview.pdf', async (ctx) => {
+    const actor = ctx.user!;
+    requirePerm(actor, 'reports.template');
+    const id = intParam(ctx.params.id!, 'id');
+    if (actor.branchIds !== 'all' && !actor.branchIds.includes(id)) throw forbidden('this branch');
+    if (!db.prepare('SELECT id FROM branches WHERE id = ?').get(id)) throw notFound('Branch not found');
+    const d = branchDesign(db, id);
+    const doc = ctx.query.get('doc') === 'invoice' ? 'invoice' : 'report';
+    const variant = ctx.query.get('variant') === 'print' ? 'print' : 'digital';
+    const pdf =
+      doc === 'invoice'
+        ? await renderInvoicePdf(sampleInvoice(d.branch, d.brand, d.paymentDetails))
+        : await renderReportPdf(sampleReport(d.branch, d.brand, d.incharge, variant));
+    return new RawResponse('application/pdf', Buffer.from(pdf), { 'Content-Disposition': `inline; filename="sample-${doc}.pdf"` });
   });
 
   // Branch images are served only to signed-in users who can see the branch.
@@ -273,8 +320,8 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     const user = ctx.user!;
     if (user.branchIds !== 'all' && !user.branchIds.includes(id)) throw forbidden('this branch');
     const kind = ctx.params.kind;
-    if (kind !== 'logo' && kind !== 'background') throw notFound();
-    const col = kind === 'logo' ? 'logo_path' : 'background_path';
+    if (kind !== 'logo' && kind !== 'background' && kind !== 'incharge-signature') throw notFound();
+    const col = kind === 'logo' ? 'logo_path' : kind === 'background' ? 'background_path' : 'incharge_signature_path';
     const row = db.prepare(`SELECT ${col} AS path FROM branches WHERE id = ?`).get(id) as { path: string | null } | undefined;
     const data = readIfExists(row?.path);
     if (!data) throw notFound('No image');

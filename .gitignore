@@ -11,3 +11,4 @@ backups/
 coverage/
 # Client-owned source documents are not published to the public repo
 *.docx
+.tmp/

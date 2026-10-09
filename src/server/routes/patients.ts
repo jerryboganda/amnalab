@@ -5,6 +5,7 @@ import { audit } from '../audit.ts';
 import { can, requirePerm, type AuthUser } from '../security.ts';
 import { ageInYears, nextSequence, pad } from '../util.ts';
 import { normalizePkPhone } from '../services/notify.ts';
+import { trendPoints } from '../services/trends.ts';
 
 export function patientVisible(db: DatabaseSync, user: AuthUser, patientId: number): boolean {
   if (user.branchIds === 'all') return true;
@@ -276,19 +277,9 @@ export function registerPatients(r: Router, db: DatabaseSync) {
         .all(id);
       return { parameters };
     }
-    const rows = db
-      .prepare(
-        `SELECT o.created_at AS date, r.value_numeric AS value, r.unit, r.flag, t.code AS test_code, tp.code AS parameter_code
-         FROM results r
-         JOIN test_parameters tp ON tp.id = r.parameter_id
-         JOIN tests t ON t.id = tp.test_id
-         JOIN order_items oi ON oi.id = r.order_item_id
-         JOIN orders o ON o.id = oi.order_id
-         WHERE o.patient_id = ? AND tp.code = ? AND r.status = 'authorized' AND r.value_numeric IS NOT NULL
-         ORDER BY o.created_at ASC LIMIT 200`,
-      )
-      .all(id, code);
-    return { parameter: code, points: rows };
+    const unit = ctx.query.get('unit');
+    const points = trendPoints(db, { patientId: id, code, unit: unit === null ? undefined : unit, limit: 200 });
+    return { parameter: code, points };
   });
 
   r.get('/api/practitioners', (ctx) => {

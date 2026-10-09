@@ -7,14 +7,19 @@ import { businessDate, dayEndUtc, dayStartUtc, fmtPkr, fromPaisa, nowIso, toPais
 import { verifyApprover } from '../services/approval.ts';
 import { assertDayOpen } from '../services/billing-core.ts';
 import { PRINT_CSP } from './orders.ts';
+import { config, loadFileConfig } from '../config.ts';
+import { branchDesign } from '../services/doc-branch.ts';
+import { renderInvoicePdf } from '../services/invoice-pdf.tsx';
 
 const METHODS = ['cash', 'card', 'bank_transfer', 'jazzcash', 'easypaisa'] as const;
 
 function invoiceRow(db: DatabaseSync, id: number) {
   return db
     .prepare(
-      `SELECT i.*, b.code AS branch_code, b.name AS branch_name, b.timezone, p.full_name AS patient_name, p.mrn, o.order_no
+      `SELECT i.*, b.code AS branch_code, b.name AS branch_name, b.timezone, p.full_name AS patient_name, p.mrn, p.phone AS patient_phone,
+              o.order_no, pr.name AS practitioner_name
        FROM invoices i JOIN branches b ON b.id = i.branch_id JOIN patients p ON p.id = i.patient_id JOIN orders o ON o.id = i.order_id
+       LEFT JOIN practitioners pr ON pr.id = o.practitioner_id
        WHERE i.id = ?`,
     )
     .get(id) as Record<string, any> | undefined;
@@ -34,6 +39,7 @@ function invoiceDto(db: DatabaseSync, id: number, user: AuthUser) {
   return {
     id: row.id,
     invoiceNo: row.invoice_no,
+    verificationCode: row.verification_code,
     orderId: row.order_id,
     orderNo: row.order_no,
     branchId: row.branch_id,
@@ -228,24 +234,104 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     const pays = (dto.payments as Array<Record<string, any>>)
       .map((p) => `<tr><td>${esc(p.kind === 'refund' ? 'Refund' : 'Paid')} ${esc(p.method)} ${esc(p.reference ?? '')}</td><td style="text-align:right">${p.kind === 'refund' ? '-' : ''}${fmtPkr(Number(p.amount_paisa))}</td></tr>`)
       .join('');
+    const design = branchDesign(db, Number(dto.branchId));
+    const brand = design.brand.primary;
+    const statusLabel = ({ paid: 'PAID', partially_paid: 'PARTIALLY PAID', issued: 'PAYMENT DUE', void: 'VOID' } as Record<string, string>)[String(dto.status)] ?? String(dto.status);
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(dto.invoiceNo)}</title>
-      <style>body{font-family:Arial,sans-serif;width:280px;margin:0;padding:8px;font-size:12px}table{width:100%;border-collapse:collapse}
-      td{padding:2px 0}.t{text-align:center;font-weight:700;font-size:14px}.b{border-top:1px dashed #000;margin:6px 0}
+      <style>body{font-family:'Inter','Segoe UI',Arial,sans-serif;width:280px;margin:0;padding:8px;font-size:11.5px;color:#0f172a}table{width:100%;border-collapse:collapse}
+      td{padding:2px 0;vertical-align:top}.r{text-align:right}.t{text-align:center;font-weight:800;font-size:15px;color:${brand};letter-spacing:.3px}
+      .m{text-align:center;color:#64748b;font-size:10.5px}.b{border-top:1px dashed #94a3b8;margin:7px 0}.k{color:#64748b}
+      .tot td{font-size:14px;font-weight:800;padding-top:4px}.st{margin:8px auto 2px;border:2px solid ${brand};border-radius:6px;padding:4px;text-align:center;font-weight:800;letter-spacing:2px;color:${brand}}
       @media print{@page{size:80mm auto;margin:2mm}}</style></head><body>
-      <div class="t">${esc(dto.branchName)}</div><div style="text-align:center">Receipt ${esc(dto.invoiceNo)}</div>
-      <div>Order ${esc(dto.orderNo)} | ${esc(new Date(String(dto.createdAt)).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' }))}</div>
-      <div>Patient: ${esc(dto.patient.name)} (${esc(dto.patient.mrn)})</div>
+      <div class="t">${esc(String(dto.branchName).toUpperCase())}</div>
+      ${design.branch.phone ? `<div class="m">Ph: ${esc(design.branch.phone)}</div>` : ''}
+      <div class="b"></div>
+      <table><tr><td class="k">Receipt</td><td class="r"><b>${esc(dto.invoiceNo)}</b></td></tr>
+      <tr><td class="k">Order</td><td class="r">${esc(dto.orderNo)}</td></tr>
+      <tr><td class="k">Date</td><td class="r">${esc(new Date(String(dto.createdAt)).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' }))}</td></tr>
+      <tr><td class="k">Patient</td><td class="r">${esc(dto.patient.name)}<br><span class="k">${esc(dto.patient.mrn)}</span></td></tr></table>
       <div class="b"></div><table>${lines}</table><div class="b"></div>
-      <table><tr><td>Subtotal</td><td style="text-align:right">${fmtPkr(toPaisa(dto.subtotalPkr))}</td></tr>
-      <tr><td>Discount${dto.discountReason ? ` (${esc(dto.discountReason)})` : ''}</td><td style="text-align:right">${dto.discountPkr > 0 ? "-" : ""}${fmtPkr(toPaisa(dto.discountPkr))}</td></tr>
-      <tr><td>Tax</td><td style="text-align:right">${fmtPkr(toPaisa(dto.taxPkr))}</td></tr>
-      <tr><td><b>Total (PKR)</b></td><td style="text-align:right"><b>${fmtPkr(toPaisa(dto.totalPkr))}</b></td></tr></table>
-      <div class="b"></div><table>${pays}</table>
-      <div>Balance due: ${fmtPkr(toPaisa(dto.balancePkr))}</div>
-      <div class="b"></div><div style="text-align:center">Thank you. Status: ${esc(dto.status)}</div>
+      <table><tr><td class="k">Subtotal</td><td class="r">${fmtPkr(toPaisa(dto.subtotalPkr))}</td></tr>
+      ${dto.discountPkr > 0 ? `<tr><td class="k">Discount${dto.discountReason ? ` (${esc(dto.discountReason)})` : ''}</td><td class="r">-${fmtPkr(toPaisa(dto.discountPkr))}</td></tr>` : ''}
+      <tr><td class="k">Tax</td><td class="r">${fmtPkr(toPaisa(dto.taxPkr))}</td></tr>
+      <tr class="tot"><td>TOTAL (PKR)</td><td class="r">${fmtPkr(toPaisa(dto.totalPkr))}</td></tr></table>
+      ${pays ? `<div class="b"></div><table>${pays}</table>` : ''}
+      <table class="tot"><tr><td>Balance due</td><td class="r">${fmtPkr(toPaisa(dto.balancePkr))}</td></tr></table>
+      <div class="st">${esc(statusLabel)}</div>
+      <div class="m">Thank you for choosing ${esc(dto.branchName)}</div>
       <script>window.onload=()=>window.print()</script></body></html>`;
     return new RawResponse('text/html; charset=utf-8', html, { 'Content-Security-Policy': PRINT_CSP });
   });
+
+  // A4 invoice PDF in the same design as the lab report. Rendered on demand because payments change it.
+  r.get('/api/invoices/:id/pdf', async (ctx) => {
+    const user = ctx.user!;
+    requirePerm(user, 'billing.read');
+    const id = intParam(ctx.params.id!, 'id');
+    const dto = invoiceDto(db, id, user);
+    const row = invoiceRow(db, id)!;
+    const design = branchDesign(db, Number(row.branch_id));
+    const base = loadFileConfig().publicBaseUrl ?? `http://${config.host}:${config.port}`;
+    const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', dateStyle: 'medium', timeStyle: 'short' });
+    const pdf = await renderInvoicePdf({
+      brand: design.brand,
+      branch: { ...design.branch, letterhead: { ...design.branch.letterhead, enabled: false } },
+      invoiceNo: String(dto.invoiceNo),
+      orderNo: String(dto.orderNo),
+      issuedAt: when(String(dto.createdAt)),
+      status: String(dto.status),
+      voidReason: (row.void_reason as string | null) ?? null,
+      patient: { name: dto.patient.name, mrn: dto.patient.mrn, phone: (row.patient_phone as string | null) ?? null, practitioner: (row.practitioner_name as string | null) ?? null },
+      lines: (dto.lines as Array<Record<string, any>>).map((l) => ({
+        description: String(l.description),
+        price: fromPaisa(Number(l.unit_price_paisa)),
+        tax: fromPaisa(Number(l.tax_paisa)),
+        total: fromPaisa(Number(l.line_total_paisa)),
+      })),
+      subtotal: dto.subtotalPkr,
+      discount: dto.discountPkr,
+      discountReason: (dto.discountReason as string | null) ?? null,
+      tax: dto.taxPkr,
+      total: dto.totalPkr,
+      paid: dto.paidPkr,
+      refunded: dto.refundedPkr,
+      balance: dto.balancePkr,
+      payments: (dto.payments as Array<Record<string, any>>).map((p) => ({
+        when: when(String(p.created_at)),
+        kind: String(p.kind),
+        method: String(p.method),
+        reference: (p.reference as string | null) ?? (p.reason as string | null) ?? null,
+        amount: fromPaisa(Number(p.amount_paisa)),
+      })),
+      paymentDetails: design.paymentDetails,
+      verificationUrl: `${base}/#/verify-invoice/${row.verification_code}`,
+      verificationCode: String(row.verification_code ?? ''),
+    });
+    return new RawResponse('application/pdf', Buffer.from(pdf), {
+      'Content-Disposition': `inline; filename="${String(dto.invoiceNo).replace(/[^A-Za-z0-9-]/g, '_')}.pdf"`,
+    });
+  });
+
+  // Public check of an invoice from its QR code. Shows no patient details.
+  r.get('/api/verify/invoice/:code', (ctx) => {
+    const code = ctx.params.code!.toUpperCase();
+    const row = db
+      .prepare(
+        `SELECT i.invoice_no, i.status, i.total_paisa, i.paid_paisa, i.refunded_paisa, i.created_at, b.name AS branch_name
+         FROM invoices i JOIN branches b ON b.id = i.branch_id WHERE i.verification_code = ?`,
+      )
+      .get(code) as Record<string, any> | undefined;
+    if (!row) return json({ valid: false, message: 'No invoice matches this code' }, 404);
+    return {
+      valid: true,
+      invoiceNo: row.invoice_no,
+      status: row.status,
+      totalPkr: fromPaisa(Number(row.total_paisa)),
+      paidPkr: fromPaisa(Number(row.paid_paisa) - Number(row.refunded_paisa)),
+      issuedAt: row.created_at,
+      branch: row.branch_name,
+    };
+  }, false);
 
   // ---- Daily cash closing
   r.get('/api/billing/closing', (ctx) => {

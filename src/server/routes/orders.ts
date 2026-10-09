@@ -138,8 +138,8 @@ export function registerOrders(r: Router, db: DatabaseSync) {
       const invoiceId = (db
         .prepare(
           `INSERT INTO invoices (branch_id, invoice_no, order_id, patient_id, subtotal_paisa, discount_type, discount_value,
-                                 discount_paisa, discount_reason, discount_approved_by, tax_paisa, total_paisa, paid_paisa, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issued', ?) RETURNING id`,
+                                 discount_paisa, discount_reason, discount_approved_by, tax_paisa, total_paisa, paid_paisa, status, created_by, verification_code)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issued', ?, upper(hex(randomblob(6)))) RETURNING id`,
         )
         .get(
           branchId,

@@ -55,7 +55,12 @@ writeFileSync(config.dbFile, restored.db);
 const filesDir = dirname(config.reportsDir);
 const db = new DatabaseSync(config.dbFile);
 const rebase = (table: string, col: string) => {
-  const rows = db.prepare(`SELECT rowid AS id, ${col} AS p FROM ${table} WHERE ${col} IS NOT NULL`).all() as Array<{ id: number; p: string }>;
+  let rows: Array<{ id: number; p: string }>;
+  try {
+    rows = db.prepare(`SELECT rowid AS id, ${col} AS p FROM ${table} WHERE ${col} IS NOT NULL`).all() as Array<{ id: number; p: string }>;
+  } catch {
+    return; // an older backup without this column; the app adds it on start
+  }
   for (const r of rows) {
     const norm = r.p.split(String.fromCharCode(92)).join('/');
     const at = norm.lastIndexOf('/files/');
@@ -63,6 +68,6 @@ const rebase = (table: string, col: string) => {
   }
 };
 // Triggers only guard audit tables; none of these tables are append-only.
-for (const [t, c] of [['branches', 'logo_path'], ['branches', 'background_path'], ['attachments', 'path'], ['reports', 'pdf_path'], ['outbox', 'attachment_path']] as const) rebase(t, c);
+for (const [t, c] of [['branches', 'logo_path'], ['branches', 'background_path'], ['attachments', 'path'], ['reports', 'pdf_path'], ['reports', 'print_pdf_path'], ['outbox', 'attachment_path'], ['users', 'signature_path'], ['branches', 'incharge_signature_path']] as const) rebase(t, c);
 db.close();
 console.log(`Restored ${file} (${restored.files} attached/report/branding files). Start the LMS again.`);

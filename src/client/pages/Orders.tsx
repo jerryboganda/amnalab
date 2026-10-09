@@ -427,6 +427,7 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
               <Badge key="st" tone={r.status === 'final' ? 'ok' : 'neutral'}>{r.status}</Badge>,
               <span key="a" className="row-actions">
                 <button onClick={() => window.open(`/api/reports/${r.id}/pdf`, '_blank', 'noopener')}>View PDF</button>
+                <button onClick={() => window.open(`/api/reports/${r.id}/pdf?variant=print`, '_blank', 'noopener')}>Print copy</button>
                 {r.status === 'final' && s.can('reports.send') ? (
                   <>
                     <select

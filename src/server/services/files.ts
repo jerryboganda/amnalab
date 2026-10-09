@@ -40,10 +40,18 @@ export function decodeDataUrl(dataUrl: string, allowed: 'image' | 'any', maxByte
   throw invalid('Only PNG, JPEG or PDF files are allowed');
 }
 
-export function saveBrandingImage(branchId: number, kind: 'logo' | 'background', dataUrl: string): string {
+export function saveBrandingImage(branchId: number, kind: 'logo' | 'background' | 'incharge-signature', dataUrl: string): string {
   const { mime, buffer } = decodeDataUrl(dataUrl, 'image', MAX_IMAGE_BYTES);
   const ext = mime === 'image/png' ? 'png' : 'jpg';
   const path = join(config.brandingDir, `branch-${branchId}-${kind}.${ext}`);
+  writeFileSync(path, buffer);
+  return path;
+}
+
+// Scanned signature of a staff member, printed on reports they authorize.
+export function saveUserSignature(userId: number, dataUrl: string): string {
+  const { mime, buffer } = decodeDataUrl(dataUrl, 'image', MAX_IMAGE_BYTES);
+  const path = join(config.brandingDir, `user-${userId}-signature.${mime === 'image/png' ? 'png' : 'jpg'}`);
   writeFileSync(path, buffer);
   return path;
 }

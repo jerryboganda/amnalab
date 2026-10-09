@@ -44,3 +44,26 @@ test('FEFO consumption uses the earliest-expiring lot first and never goes negat
   assert.throws(() => db.prepare('UPDATE inv_ledger SET qty = 1').run(), /immutable/);
   assert.throws(() => db.prepare('DELETE FROM inv_ledger').run(), /immutable/);
 });
+
+test('report trends use only earlier orders and the same unit', async () => {
+  const { trendPoints } = await import('../../src/server/services/trends.ts');
+  const br = db.prepare("INSERT INTO branches (organization_id, name, code) VALUES (1, 'Trend', 'TRND') RETURNING id").get() as { id: number };
+  const dep = db.prepare("INSERT INTO departments (code, name) VALUES ('TD', 'Trend dept') RETURNING id").get() as { id: number };
+  const t = db.prepare("INSERT INTO tests (code, name, department_id, specimen_type) VALUES ('TT', 'Trend test', ?, 'Serum') RETURNING id").get(dep.id) as { id: number };
+  const p = db.prepare("INSERT INTO test_parameters (test_id, code, name, result_type) VALUES (?, 'GLU', 'Glucose', 'numeric') RETURNING id").get(t.id) as { id: number };
+  const pat = db.prepare("INSERT INTO patients (branch_id, mrn, full_name, gender) VALUES (?, 'TRND-1', 'Trend P', 'F') RETURNING id").get(br.id) as { id: number };
+  const add = (n: number, at: string, value: number, unit: string) => {
+    const o = db.prepare('INSERT INTO orders (branch_id, order_no, patient_id, created_at) VALUES (?, ?, ?, ?) RETURNING id').get(br.id, `TO-${n}`, pat.id, at) as { id: number };
+    const sp = db.prepare("INSERT INTO specimens (branch_id, order_id, accession_no, specimen_type) VALUES (?, ?, ?, 'Serum') RETURNING id").get(br.id, o.id, `TS-${n}`) as { id: number };
+    const oi = db.prepare('INSERT INTO order_items (order_id, test_id, specimen_id) VALUES (?, ?, ?) RETURNING id').get(o.id, t.id, sp.id) as { id: number };
+    db.prepare("INSERT INTO results (order_item_id, parameter_id, branch_id, value_numeric, unit, status) VALUES (?, ?, ?, ?, ?, 'authorized')").run(oi.id, p.id, br.id, value, unit);
+  };
+  add(1, '2026-01-01T00:00:00.000Z', 90, 'mg/dL');
+  add(2, '2026-02-01T00:00:00.000Z', 5.2, 'mmol/L');
+  add(3, '2026-03-01T00:00:00.000Z', 101, 'mg/dL');
+  add(4, '2026-04-01T00:00:00.000Z', 110, 'mg/dL'); // the report's own order
+  add(5, '2026-05-01T00:00:00.000Z', 140, 'mg/dL'); // came later
+  const pts = trendPoints(db, { patientId: pat.id, code: 'GLU', unit: 'mg/dL', before: '2026-04-01T00:00:00.000Z', limit: 3 });
+  assert.deepEqual(pts.map((x) => x.value), [90, 101]);
+  assert.equal(trendPoints(db, { patientId: pat.id, code: 'GLU', limit: 2 }).map((x) => x.value).join(','), '110,140');
+});

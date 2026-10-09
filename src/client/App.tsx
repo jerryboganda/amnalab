@@ -90,6 +90,8 @@ export function App() {
 
   const verifyCode = /^#\/verify\/([A-Za-z0-9]+)/.exec(hash)?.[1];
   if (verifyCode) return <Verify code={verifyCode} />;
+  const invoiceCode = /^#\/verify-invoice\/([A-Za-z0-9]+)/.exec(hash)?.[1];
+  if (invoiceCode) return <Verify code={invoiceCode} kind="invoice" />;
   if (status === 'loading') return <div className="center muted">Loading...</div>;
   if (status === 'setup') return <Setup onDone={() => void loadMe()} />;
   if (status === 'login' || !me) return <Login onDone={() => void loadMe()} />;

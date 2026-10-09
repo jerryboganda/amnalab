@@ -521,4 +521,26 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    name: '010_document_design',
+    sql: `
+      ALTER TABLE branches ADD COLUMN brand_primary TEXT NOT NULL DEFAULT '#1F5FAE';
+      ALTER TABLE branches ADD COLUMN brand_secondary TEXT NOT NULL DEFAULT '#C8102E';
+      ALTER TABLE branches ADD COLUMN timings TEXT;
+      ALTER TABLE branches ADD COLUMN disclaimer TEXT;
+      ALTER TABLE branches ADD COLUMN incharge_name TEXT;
+      ALTER TABLE branches ADD COLUMN incharge_title TEXT;
+      ALTER TABLE branches ADD COLUMN incharge_signature_path TEXT;
+      ALTER TABLE branches ADD COLUMN letterhead_mode INTEGER NOT NULL DEFAULT 0 CHECK (letterhead_mode IN (0,1));
+      ALTER TABLE branches ADD COLUMN letterhead_top_mm INTEGER NOT NULL DEFAULT 45;
+      ALTER TABLE branches ADD COLUMN letterhead_bottom_mm INTEGER NOT NULL DEFAULT 30;
+      ALTER TABLE branches ADD COLUMN payment_details TEXT;
+      ALTER TABLE users ADD COLUMN qualifications TEXT;
+      ALTER TABLE users ADD COLUMN signature_path TEXT;
+      ALTER TABLE reports ADD COLUMN print_pdf_path TEXT;
+      ALTER TABLE invoices ADD COLUMN verification_code TEXT;
+      UPDATE invoices SET verification_code = upper(hex(randomblob(6))) WHERE verification_code IS NULL;
+      CREATE UNIQUE INDEX invoices_verification ON invoices(verification_code);
+    `,
+  },
 ];

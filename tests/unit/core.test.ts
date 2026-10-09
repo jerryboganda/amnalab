@@ -100,3 +100,14 @@ test('backup archive: files round-trip and unsafe paths are refused', () => {
   const evil = packArchive([{ path: 'lms.db', data: Buffer.from('x') }, { path: 'files/../../escape.txt', data: Buffer.from('x') }]);
   assert.throws(() => restoreArchive(evil, false), /unsafe file path/);
 });
+
+test('range bar geometry: band inside the scale, out-of-scale values clamp to the edge', async () => {
+  const { rangeGeometry } = await import('../../src/pdf/lab/geometry.ts');
+  const g = rangeGeometry(13, 12, 15, 100)!;
+  assert.ok(g.bandStart > 0 && g.bandEnd < 100 && g.marker > g.bandStart && g.marker < g.bandEnd && g.clamped === null);
+  assert.deepEqual(rangeGeometry(2, 12, 15, 100)!.clamped, 'low');
+  assert.equal(rangeGeometry(2, 12, 15, 100)!.marker, 0);
+  assert.equal(rangeGeometry(99, 12, 15, 100)!.clamped, 'high');
+  assert.equal(rangeGeometry(150, null, 200, 100)!.bandStart, 0);
+  assert.equal(rangeGeometry(10, null, null, 100), null);
+});

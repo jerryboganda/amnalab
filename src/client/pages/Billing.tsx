@@ -149,7 +149,8 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
         <a href="#/billing">&larr; Billing</a>
         <h1>{inv.invoiceNo}</h1>
         <Badge tone={inv.status === 'paid' ? 'ok' : inv.status === 'void' ? 'danger' : 'warn'}>{inv.status.replace('_', ' ')}</Badge>
-        <button onClick={() => window.open(`/api/invoices/${id}/receipt`, '_blank', 'noopener')}>Print receipt</button>
+        <button onClick={() => window.open(`/api/invoices/${id}/pdf`, '_blank', 'noopener')}>Invoice PDF</button>
+        <button onClick={() => window.open(`/api/invoices/${id}/receipt`, '_blank', 'noopener')}>Print slip (80 mm)</button>
       </div>
       <p className="muted">{inv.patient.name} ({inv.patient.mrn}) | Order <a href={`#/orders/${inv.orderId}`}>{inv.orderNo}</a> | {inv.branchName} | {when(inv.createdAt)}</p>
       {act.error ? <Notice kind="error">{act.error}</Notice> : null}

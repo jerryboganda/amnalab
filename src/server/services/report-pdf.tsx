@@ -1,186 +1,286 @@
-import { Document, Fixed, Page, View, Watermark } from '@formepdf/react';
+import { Document, Page, Text, View, Watermark } from '@formepdf/react';
 import { renderDocument } from '@formepdf/core';
-import { PdfcnThemeProvider } from '../../pdf/components/theme-provider.tsx';
-import { professionalTheme } from '../../pdf/components/theme-professional.ts';
-import { PageHeader } from '../../pdf/components/page-header/page-header.tsx';
-import { PageFooter } from '../../pdf/components/page-footer/page-footer.tsx';
-import { PageNumber } from '../../pdf/components/page-number/page-number.tsx';
-import { Heading } from '../../pdf/components/heading/heading.tsx';
-import { Section } from '../../pdf/components/section/section.tsx';
-import { Table, TableBody, TableCell, TableHeader, TableRow } from '../../pdf/components/table/table.tsx';
-import { PdfSignatureBlock } from '../../pdf/components/signature/signature.tsx';
-import { PdfQRCode } from '../../pdf/components/qrcode/qrcode.tsx';
-import { PdfImage } from '../../pdf/components/pdf-image/pdf-image.tsx';
-import { Text } from '../../pdf/components/text/text.tsx';
+import {
+  DeptHeader,
+  FAINT,
+  FLAG_LABEL,
+  FONT,
+  FlagChip,
+  GUTTER,
+  INK,
+  KV,
+  LINE,
+  LabFooter,
+  LabHeader,
+  MUTED,
+  RangeBar,
+  SOFT,
+  SignatureCard,
+  Sparkline,
+  VerifyQr,
+  flagStyle,
+  registerFonts,
+  tint,
+  type Brand,
+  type FlagCode,
+  type LetterheadBranch,
+  type SignerView,
+} from '../../pdf/lab/kit.tsx';
 
 export interface ReportLine {
   parameter: string;
   value: string;
+  valueNum: number | null;
   unit: string;
   reference: string;
-  flag: string;
+  refLow: number | null;
+  refHigh: number | null;
+  flag: FlagCode;
   critical: boolean;
   comment: string | null;
+  /** Earlier authorized values of the same parameter (oldest first), at most 3. */
+  trend: number[];
+  previous: { value: string; date: string } | null;
 }
 
 export interface ReportData {
+  variant: 'digital' | 'print';
   reportNo: string;
   version: number;
   issuedAt: string;
   verificationUrl: string;
+  verificationCode: string;
   amended: boolean;
   amendmentReasons: string[];
-  branch: {
-    name: string;
-    address: string | null;
-    phone: string | null;
-    email: string | null;
-    motto: string | null;
-    headerText: string | null;
+  brand: Brand;
+  branch: LetterheadBranch & {
     footerText: string | null;
-    logoDataUri: string | null;
+    timings: string | null;
+    disclaimer: string | null;
     backgroundDataUri: string | null;
+    letterhead: { enabled: boolean; topMm: number; bottomMm: number };
   };
   patient: { name: string; mrn: string; gender: string; age: string; practitioner: string | null; allergies: string | null };
-  order: { orderNo: string; priority: string; createdAt: string; accessions: string[] };
+  order: { orderNo: string; priority: string; createdAt: string; collectedAt: string | null; receivedAt: string | null; accessions: string[]; specimenTypes: string[] };
   sections: Array<{ department: string; tests: Array<{ name: string; lines: ReportLine[] }> }>;
-  signers: Array<{ name: string; title: string | null }>;
+  incharge: SignerView | null;
+  signers: SignerView[];
 }
 
-// Column widths in points; A4 content width is 515pt with 40pt margins.
-const W = { param: 165, result: 70, unit: 80, ref: 110, flag: 90 } as const;
-
 const GENDER: Record<string, string> = { M: 'Male', F: 'Female', O: 'Other' };
+const MM = 2.8346;
+// Column widths in points; the content width is 595 - 2 x 28 = 539.
+const C = { param: 146, result: 56, unit: 58, ref: 80, bar: 92, trend: 62, flag: 45 } as const;
+
+function HeadCell({ w, children, align = 'left' }: { w: number; children: string; align?: 'left' | 'right' | 'center' }) {
+  return <Text style={{ width: w, fontSize: 6.3, fontWeight: 700, color: FAINT, letterSpacing: 0.8, textAlign: align, textTransform: 'uppercase' }}>{children}</Text>;
+}
+
+function ResultRow({ l, i, brand }: { l: ReportLine; i: number; brand: Brand }) {
+  const s = flagStyle(l.flag);
+  const abnormal = l.flag != null && l.flag !== 'N';
+  return (
+    <View style={{ backgroundColor: i % 2 === 1 ? SOFT : '#FFFFFF', paddingVertical: 2.6, paddingHorizontal: 4 }} wrap={false}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={{ width: C.param, fontSize: 8.2, color: INK, fontWeight: abnormal ? 600 : 400 }}>{l.parameter}</Text>
+        <View style={{ width: C.result, paddingRight: 7 }}>
+          <Text style={{ fontSize: 8.8, fontWeight: 800, color: abnormal ? s.fg : INK, textAlign: 'right' }}>{l.value}</Text>
+        </View>
+        <Text style={{ width: C.unit, fontSize: 7, color: MUTED }}>{l.unit}</Text>
+        <Text style={{ width: C.ref, fontSize: 7.2, color: INK }}>{l.reference}</Text>
+        <View style={{ width: C.bar }}>
+          <RangeBar value={l.valueNum} low={l.refLow} high={l.refHigh} code={l.flag} brand={brand} width={C.bar - 6} />
+        </View>
+        <View style={{ width: C.trend, flexDirection: 'row', alignItems: 'center' }}>
+          {l.valueNum != null && l.trend.length > 0 ? (
+            <>
+              <Sparkline points={l.trend} current={l.valueNum} code={l.flag} brand={brand} width={30} />
+              {l.previous ? <Text style={{ fontSize: 5.8, color: MUTED, marginLeft: 2 }}>{`prev ${l.previous.value}`}</Text> : null}
+            </>
+          ) : null}
+        </View>
+        <View style={{ width: C.flag - 8, alignItems: 'flex-end' }}>
+          <FlagChip code={l.flag} />
+        </View>
+      </View>
+      {l.comment ? <Text style={{ fontSize: 6.8, color: MUTED, marginTop: 1, marginLeft: 6 }}>{`Note: ${l.comment}`}</Text> : null}
+    </View>
+  );
+}
+
+function TestBlock({ name, lines, brand }: { name: string; lines: ReportLine[]; brand: Brand }) {
+  const graphic = lines.some((l) => l.valueNum != null);
+  return (
+    <View wrap={false} style={{ marginTop: 5, borderWidth: 0.6, borderColor: LINE, borderRadius: 5 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingTop: 4, paddingBottom: 3 }}>
+        <Text style={{ fontSize: 9, fontWeight: 700, color: INK }}>{name}</Text>
+        <View style={{ flexGrow: 1 }} />
+        <Text style={{ fontSize: 6.5, color: FAINT }}>{`${lines.length} ${lines.length === 1 ? 'parameter' : 'parameters'}`}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 4, paddingBottom: 2, borderBottomWidth: 0.6, borderBottomColor: LINE }}>
+        <HeadCell w={C.param}>Parameter</HeadCell>
+        <View style={{ width: C.result, paddingRight: 7 }}>
+          <HeadCell w={C.result - 7} align="right">Result</HeadCell>
+        </View>
+        <HeadCell w={C.unit}>Unit</HeadCell>
+        <HeadCell w={C.ref}>Reference</HeadCell>
+        <HeadCell w={C.bar}>{graphic ? 'Position in range' : ''}</HeadCell>
+        <HeadCell w={C.trend}>{graphic ? 'Trend' : ''}</HeadCell>
+        <HeadCell w={C.flag - 8} align="right">Flag</HeadCell>
+      </View>
+      {lines.map((l, i) => (
+        <ResultRow key={`${l.parameter}-${i}`} l={l} i={i} brand={brand} />
+      ))}
+    </View>
+  );
+}
+
+function PatientCard({ d }: { d: ReportData }) {
+  const b = d.brand;
+  return (
+    <View style={{ flexDirection: 'row', borderWidth: 0.8, borderColor: tint(b.primary, 0.75), borderRadius: 7, backgroundColor: tint(b.primary, 0.96), padding: 8 }}>
+      <View style={{ flexGrow: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
+          <Text style={{ fontSize: 13, fontWeight: 800, color: INK }}>{d.patient.name}</Text>
+          <View style={{ marginLeft: 7, backgroundColor: b.primary, borderRadius: 9999, paddingHorizontal: 6, paddingVertical: 1 }}>
+            <Text style={{ fontSize: 7, fontWeight: 700, color: '#FFFFFF' }}>{`${GENDER[d.patient.gender] ?? d.patient.gender} • ${d.patient.age}`}</Text>
+          </View>
+          {d.order.priority !== 'routine' ? (
+            <View style={{ marginLeft: 5, backgroundColor: b.secondary, borderRadius: 9999, paddingHorizontal: 6, paddingVertical: 1 }}>
+              <Text style={{ fontSize: 7, fontWeight: 700, color: '#FFFFFF' }}>{d.order.priority.toUpperCase()}</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          <KV k="MRN" v={d.patient.mrn} width={112} strong />
+          <KV k="Lab / order no." v={d.order.orderNo} width={112} strong />
+          <KV k="Referred by" v={d.patient.practitioner ?? 'Self'} width={112} />
+          <KV k="Specimen" v={d.order.specimenTypes.join(', ') || '-'} width={112} />
+          <KV k="Registered" v={d.order.createdAt} width={112} />
+          <KV k="Collected" v={d.order.collectedAt ?? '-'} width={112} />
+          <KV k="Received" v={d.order.receivedAt ?? '-'} width={112} />
+          <KV k="Reported" v={d.issuedAt} width={112} strong />
+        </View>
+        {d.patient.allergies ? <Text style={{ fontSize: 7, color: '#B91C1C', fontWeight: 600 }}>{`Known allergies: ${d.patient.allergies}`}</Text> : null}
+      </View>
+      <VerifyQr url={d.verificationUrl} code={d.verificationCode} brand={b} />
+    </View>
+  );
+}
+
+function AbnormalSummary({ d }: { d: ReportData }) {
+  const items = d.sections.flatMap((s) => s.tests.flatMap((t) => t.lines)).filter((l) => l.flag && l.flag !== 'N');
+  items.sort((a, z) => Number(z.critical) - Number(a.critical));
+  if (items.length === 0) {
+    return (
+      <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 5, paddingVertical: 4, paddingHorizontal: 8 }}>
+        <Text style={{ fontSize: 8, fontWeight: 700, color: '#047857' }}>● All reported values are within their reference ranges.</Text>
+      </View>
+    );
+  }
+  const crit = items.filter((i) => i.critical).length;
+  return (
+    <View wrap={false} style={{ marginTop: 6, borderWidth: 0.8, borderColor: '#FECACA', backgroundColor: '#FFF7F7', borderRadius: 6, padding: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+        <Text style={{ fontSize: 8.4, fontWeight: 800, color: '#B91C1C', letterSpacing: 0.6 }}>ATTENTION</Text>
+        <Text style={{ fontSize: 7.6, color: INK, marginLeft: 6 }}>
+          {`${items.length} result${items.length === 1 ? '' : 's'} outside the reference range${crit ? `, ${crit} critical` : ''}`}
+        </Text>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+        {items.map((l, i) => {
+          const s = flagStyle(l.flag);
+          return (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: tint(s.fg, 0.7), borderRadius: 9999, paddingHorizontal: 6, paddingVertical: 1.5, marginRight: 4, marginBottom: 3 }}>
+              <Text style={{ fontSize: 7.2, fontWeight: 800, color: s.fg }}>{`${s.sym} ${l.parameter} ${l.value}`}</Text>
+              <Text style={{ fontSize: 6.4, color: MUTED, marginLeft: 3 }}>{`${l.unit} • ${FLAG_LABEL[l.flag ?? ''] ?? ''}${l.reference ? ` (ref ${l.reference})` : ''}`}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 function ReportDocument({ d }: { d: ReportData }) {
+  const lh = d.variant === 'print' && d.branch.letterhead.enabled;
+  const top = lh ? d.branch.letterhead.topMm * MM : null;
+  const bottom = lh ? d.branch.letterhead.bottomMm * MM : null;
+  const b = d.brand;
   return (
-    <Document title={`Laboratory report ${d.reportNo}`} author={d.branch.name} subject={`Report ${d.reportNo} version ${d.version}`}>
-      <Page size="A4" margin={40}>
-        {d.branch.backgroundDataUri ? (
-          <View style={{ position: 'absolute', top: -40, left: -40, width: 595, height: 842 }}>
-            <PdfImage src={d.branch.backgroundDataUri} width={595} height={842} fit="cover" />
-          </View>
-        ) : null}
-        {d.amended ? <Watermark text="AMENDED" fontSize={70} color="rgba(0,0,0,0.06)" angle={-35} /> : null}
-
-        <PageHeader
-          title={d.branch.name}
-          subtitle={d.branch.motto ?? undefined}
-          rightText={`Report ${d.reportNo}`}
-          rightSubText={`Version ${d.version}${d.amended ? ' (amended)' : ''}`}
-          variant={d.branch.logoDataUri ? 'logo-left' : 'simple'}
-          logo={d.branch.logoDataUri ? <PdfImage src={d.branch.logoDataUri} width={48} height={48} fit="contain" /> : undefined}
-          fixed
+    <Document
+      title={`Laboratory report ${d.reportNo}`}
+      author={d.branch.name}
+      subject={`Report ${d.reportNo} version ${d.version}`}
+      style={{ fontFamily: FONT, fontSize: 8, color: INK }}
+    >
+      <Page
+        size="A4"
+        margin={{ top: 0, bottom: 0, left: 0, right: 0 } as never}
+        {...(!lh && d.branch.backgroundDataUri ? { backgroundImage: d.branch.backgroundDataUri, backgroundSize: 'cover' as const, backgroundOpacity: 0.12 } : {})}
+      >
+        {d.amended ? <Watermark text="AMENDED" fontSize={80} color="rgba(185,28,28,0.07)" angle={-35} /> : null}
+        <LabHeader
+          b={d.branch}
+          brand={b}
+          docTitle="Laboratory report"
+          docMeta={[d.reportNo, `Version ${d.version}${d.amended ? ' • amended' : ''}`]}
+          blankHeightPt={top}
         />
 
-        {[d.branch.address, d.branch.phone, d.branch.email].some(Boolean) ? (
-          <Text variant="sm">{[d.branch.address, d.branch.phone ? `Tel: ${d.branch.phone}` : null, d.branch.email].filter(Boolean).join('  |  ')}</Text>
-        ) : null}
-        {d.branch.headerText ? <Text variant="sm">{d.branch.headerText}</Text> : null}
+        <LabFooter brand={b} timings={d.branch.timings} disclaimer={d.branch.disclaimer} docNo={`${d.reportNo} • v${d.version} • ${d.patient.name} • ${d.patient.mrn}`} blankHeightPt={bottom} />
 
-        <Section variant="card" spacing="sm">
-          <Heading level={4}>Patient</Heading>
-          <Text>{`Name: ${d.patient.name}    MRN: ${d.patient.mrn}`}</Text>
-          <Text>{`Age: ${d.patient.age}    Sex: ${GENDER[d.patient.gender] ?? d.patient.gender}`}</Text>
-          <Text>{`Referring doctor: ${d.patient.practitioner ?? 'Self'}`}</Text>
-          {d.patient.allergies ? <Text>{`Known allergies: ${d.patient.allergies}`}</Text> : null}
-          <Text>{`Order: ${d.order.orderNo}    Priority: ${d.order.priority.toUpperCase()}`}</Text>
-          <Text>{`Ordered: ${d.order.createdAt}    Accession: ${d.order.accessions.join(', ')}`}</Text>
-        </Section>
+        <View style={{ paddingHorizontal: GUTTER }}>
+          <PatientCard d={d} />
+          <AbnormalSummary d={d} />
 
-        {d.amended && d.amendmentReasons.length > 0 ? (
-          <Section variant="card" spacing="sm">
-            <Heading level={5}>Amendment</Heading>
-            {d.amendmentReasons.map((r, i) => (
-              <Text key={i}>{`- ${r}`}</Text>
-            ))}
-          </Section>
-        ) : null}
-
-        {d.sections.map((dept) => (
-          <View key={dept.department} style={{ marginTop: 10 }}>
-            <Heading level={3}>{dept.department}</Heading>
-            {dept.tests.map((test) => (
-              <View key={test.name} style={{ marginTop: 6 }}>
-                <Text weight="semibold">{test.name}</Text>
-                <Table variant="line" zebraStripe>
-                  <TableHeader>
-                    <TableRow header>
-                      <TableCell header width={W.param}>Parameter</TableCell>
-                      <TableCell header width={W.result} align="right">Result</TableCell>
-                      <TableCell header width={W.unit}>Unit</TableCell>
-                      <TableCell header width={W.ref}>Reference range</TableCell>
-                      <TableCell header width={W.flag}>Flag</TableCell>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {test.lines.map((l, i) => (
-                      <TableRow key={`${l.parameter}-${i}`}>
-                        <TableCell width={W.param}>{l.parameter}</TableCell>
-                        <TableCell width={W.result} align="right" style={{ fontWeight: 700 }}>{l.value}</TableCell>
-                        <TableCell width={W.unit}>{l.unit}</TableCell>
-                        <TableCell width={W.ref}>{l.reference}</TableCell>
-                        <TableCell width={W.flag} style={l.critical ? { color: '#b91c1c', fontWeight: 700 } : l.flag && l.flag !== 'Normal' ? { fontWeight: 700 } : {}}>{l.flag}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {test.lines
-                  .filter((l) => l.comment)
-                  .map((l, i) => (
-                    <Text key={i} variant="sm">{`${l.parameter}: ${l.comment}`}</Text>
-                  ))}
-              </View>
-            ))}
-          </View>
-        ))}
-
-        <View style={{ marginTop: 18 }}>
-          {d.signers.length > 2 ? (
-            <View>
-              <Text weight="semibold">Authorized by</Text>
-              {d.signers.map((sg, i) => (
-                <Text key={i}>{`${sg.name}${sg.title ? ` (${sg.title})` : ''}`}</Text>
+          {d.amended && d.amendmentReasons.length > 0 ? (
+            <View wrap={false} style={{ marginTop: 6, borderLeftWidth: 3, borderLeftColor: '#D97706', backgroundColor: '#FFFBEB', borderRadius: 4, padding: 6 }}>
+              <Text style={{ fontSize: 8, fontWeight: 800, color: '#B45309' }}>{`AMENDED REPORT • version ${d.version} replaces earlier versions`}</Text>
+              {d.amendmentReasons.map((r, i) => (
+                <Text key={i} style={{ fontSize: 7.2, color: INK, marginTop: 1 }}>{`• ${r}`}</Text>
               ))}
             </View>
-          ) : d.signers.length === 2 ? (
-            <PdfSignatureBlock
-              variant="double"
-              signers={[
-                { label: 'Authorized by', name: d.signers[0]!.name, title: d.signers[0]!.title ?? undefined },
-                { label: 'Authorized by', name: d.signers[1]!.name, title: d.signers[1]!.title ?? undefined },
-              ]}
-            />
-          ) : (
-            <PdfSignatureBlock
-              variant="single"
-              label="Authorized by"
-              name={d.signers[0]?.name ?? ''}
-              title={d.signers[0]?.title ?? undefined}
-            />
-          )}
-        </View>
+          ) : null}
 
-        <View style={{ marginTop: 14, flexDirection: 'row', alignItems: 'center' }}>
-          <PdfQRCode value={d.verificationUrl} size={64} caption="Verify online" />
-          <View style={{ marginLeft: 12 }}>
-            <Text variant="sm">{`Issued ${d.issuedAt}. Results are valid only when the report is authorized and unaltered.`}</Text>
+          {d.sections.map((dept) => (
+            <View key={dept.department}>
+              <DeptHeader name={dept.department} count={dept.tests.length} brand={b} />
+              {dept.tests.map((t) => (
+                <TestBlock key={t.name} name={t.name} lines={t.lines} brand={b} />
+              ))}
+            </View>
+          ))}
+
+          <View wrap={false} style={{ marginTop: 14 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+              {d.incharge ? <SignatureCard s={d.incharge} brand={b} align="left" /> : <View />}
+              <View style={{ alignItems: 'flex-end' }}>
+                {d.signers.map((s, i) => (
+                  <View key={i} style={{ marginTop: i ? 8 : 0 }}>
+                    <SignatureCard s={s} brand={b} align="right" />
+                  </View>
+                ))}
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
+              <View style={{ flexGrow: 1, height: 0.6, backgroundColor: LINE }} />
+              <Text style={{ fontSize: 6.8, color: FAINT, marginHorizontal: 8, letterSpacing: 1.2 }}>END OF REPORT</Text>
+              <View style={{ flexGrow: 1, height: 0.6, backgroundColor: LINE }} />
+            </View>
+            <Text style={{ fontSize: 6.2, color: MUTED, textAlign: 'center', marginTop: 3 }}>
+              {`Electronically authorized and issued ${d.issuedAt}. Verify authenticity by scanning the QR code or at ${d.verificationUrl}`}
+            </Text>
+            {d.branch.footerText ? <Text style={{ fontSize: 6.4, color: MUTED, textAlign: 'center', marginTop: 2 }}>{d.branch.footerText}</Text> : null}
           </View>
         </View>
 
-        <Fixed position="footer">
-          <PageFooter leftText={d.branch.footerText ?? d.branch.name} rightText={d.reportNo} centerText={`Issued ${d.issuedAt}`} />
-          <PageNumber format="Page {page} of {total}" align="right" />
-        </Fixed>
       </Page>
     </Document>
   );
 }
 
 export async function renderReportPdf(data: ReportData): Promise<Uint8Array> {
-  return renderDocument(
-    <PdfcnThemeProvider theme={professionalTheme}>
-      <ReportDocument d={data} />
-    </PdfcnThemeProvider>,
-  );
+  registerFonts();
+  return renderDocument(<ReportDocument d={data} />);
 }

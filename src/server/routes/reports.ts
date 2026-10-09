@@ -39,14 +39,17 @@ export function registerReports(r: Router, db: DatabaseSync) {
     const user = ctx.user!;
     requirePerm(user, 'reports.read');
     const id = intParam(ctx.params.id!, 'id');
-    const row = db.prepare('SELECT branch_id, pdf_path, report_no FROM reports WHERE id = ?').get(id) as
-      | { branch_id: number; pdf_path: string; report_no: string }
+    const row = db.prepare('SELECT branch_id, pdf_path, print_pdf_path, report_no FROM reports WHERE id = ?').get(id) as
+      | { branch_id: number; pdf_path: string; print_pdf_path: string | null; report_no: string }
       | undefined;
     if (!row) throw notFound('Report not found');
     assertBranch(user, row.branch_id);
-    if (!existsSync(row.pdf_path)) throw notFound('The PDF file is missing from disk');
-    return new RawResponse('application/pdf', readFileSync(row.pdf_path), {
-      'Content-Disposition': `inline; filename="${row.report_no.replace(/[^A-Za-z0-9-]/g, '_')}.pdf"`,
+    // ?variant=print gives the copy laid out for the branch's paper (blank letterhead area when pre-printed).
+    const print = ctx.query.get('variant') === 'print' && row.print_pdf_path && existsSync(row.print_pdf_path);
+    const path = print ? row.print_pdf_path! : row.pdf_path;
+    if (!existsSync(path)) throw notFound('The PDF file is missing from disk');
+    return new RawResponse('application/pdf', readFileSync(path), {
+      'Content-Disposition': `inline; filename="${row.report_no.replace(/[^A-Za-z0-9-]/g, '_')}${print ? '-print' : ''}.pdf"`,
     });
   });
 

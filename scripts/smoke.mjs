@@ -249,6 +249,16 @@ try {
   assert.equal(pay.json.status, 'paid');
   const receipt = await reception('GET', `/api/invoices/${inv.id}/receipt`, undefined, { raw: true });
   assert.equal(receipt.status, 200);
+  const invPdf = await reception('GET', `/api/invoices/${inv.id}/pdf`, undefined, { raw: true });
+  assert.equal(invPdf.status, 200);
+  assert.equal(invPdf.buffer.subarray(0, 4).toString(), '%PDF');
+  const invCode = (await reception('GET', `/api/invoices/${inv.id}`)).json.verificationCode;
+  const invCheck = await client()('GET', `/api/verify/invoice/${invCode}`);
+  assert.equal(invCheck.json.valid, true);
+  assert.equal(invCheck.json.status, 'paid');
+  assert.ok(!JSON.stringify(invCheck.json).includes('Ayesha'), 'invoice verification must not reveal the patient');
+  const printCopy = await reception('GET', `/api/reports/${reports[0].id}/pdf?variant=print`, undefined, { raw: true });
+  assert.equal(printCopy.buffer.subarray(0, 4).toString(), '%PDF');
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
   const closing = (await admin('GET', `/api/billing/closing?branchId=${branchId}&date=${today}`)).json;
   assert.ok(closing.expectedCashPkr >= 500);
