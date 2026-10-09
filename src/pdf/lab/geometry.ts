@@ -46,3 +46,24 @@ export function rangeGeometry(value: number, low: number | null, high: number | 
   return { bandStart, bandEnd, marker: Math.min(width, Math.max(0, raw)), clamped };
 }
 
+
+/** Closed polygon path of a ring segment (angles in degrees, SVG y-down). Avoids relying on SVG arc support. */
+export function ringPath(cx: number, cy: number, rOuter: number, rInner: number, fromDeg: number, toDeg: number, steps = 28): string {
+  const pt = (r: number, deg: number) => {
+    const a = (deg * Math.PI) / 180;
+    return `${(cx + r * Math.cos(a)).toFixed(2)} ${(cy + r * Math.sin(a)).toFixed(2)}`;
+  };
+  const out: string[] = [];
+  for (let i = 0; i <= steps; i++) out.push(pt(rOuter, fromDeg + ((toDeg - fromDeg) * i) / steps));
+  for (let i = steps; i >= 0; i--) out.push(pt(rInner, fromDeg + ((toDeg - fromDeg) * i) / steps));
+  return `M${out.join(' L')} Z`;
+}
+
+const SUP: Record<string, string> = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻' };
+/** "x10^9/L" -> "×10⁹/L", "10^3/uL" -> "10³/µL". */
+export function formatUnit(u: string): string {
+  return u
+    .replace(/\bx\s?10\^/gi, '×10^')
+    .replace(/\^(-?\d+)/g, (_, d: string) => [...d].map((c) => SUP[c] ?? c).join(''))
+    .replace(/\bu(L|l|g|mol)\b/g, 'µ$1');
+}

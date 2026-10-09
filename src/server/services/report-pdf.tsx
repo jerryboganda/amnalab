@@ -19,6 +19,7 @@ import {
   Sparkline,
   VerifyQr,
   flagStyle,
+  formatUnit,
   registerFonts,
   tint,
   type Brand,
@@ -86,7 +87,7 @@ function ResultRow({ l, i, brand }: { l: ReportLine; i: number; brand: Brand }) 
         <View style={{ width: C.result, paddingRight: 7 }}>
           <Text style={{ fontSize: 8.8, fontWeight: 800, color: abnormal ? s.fg : INK, textAlign: 'right' }}>{l.value}</Text>
         </View>
-        <Text style={{ width: C.unit, fontSize: 7, color: MUTED }}>{l.unit}</Text>
+        <Text style={{ width: C.unit, fontSize: 7, color: MUTED }}>{formatUnit(l.unit)}</Text>
         <Text style={{ width: C.ref, fontSize: 7.2, color: INK }}>{l.reference}</Text>
         <View style={{ width: C.bar }}>
           <RangeBar value={l.valueNum} low={l.refLow} high={l.refHigh} code={l.flag} brand={brand} width={C.bar - 6} />
@@ -108,16 +109,18 @@ function ResultRow({ l, i, brand }: { l: ReportLine; i: number; brand: Brand }) 
   );
 }
 
-function TestBlock({ name, lines, brand }: { name: string; lines: ReportLine[]; brand: Brand }) {
+function TestBlock({ name, lines, brand }: { name: string | null; lines: ReportLine[]; brand: Brand }) {
   const graphic = lines.some((l) => l.valueNum != null);
   return (
-    <View wrap={false} style={{ marginTop: 5, borderWidth: 0.6, borderColor: LINE, borderRadius: 5 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingTop: 4, paddingBottom: 3 }}>
-        <Text style={{ fontSize: 9, fontWeight: 700, color: INK }}>{name}</Text>
-        <View style={{ flexGrow: 1 }} />
-        <Text style={{ fontSize: 6.5, color: FAINT }}>{`${lines.length} ${lines.length === 1 ? 'parameter' : 'parameters'}`}</Text>
-      </View>
-      <View style={{ flexDirection: 'row', paddingHorizontal: 4, paddingBottom: 2, borderBottomWidth: 0.6, borderBottomColor: LINE }}>
+    <View wrap={lines.length > 16} style={{ marginTop: 5, borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden', paddingBottom: 1.5 }}>
+      {name ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingTop: 4, paddingBottom: 3 }}>
+          <Text style={{ fontSize: 9, fontWeight: 700, color: INK }}>{name}</Text>
+          <View style={{ flexGrow: 1 }} />
+          <Text style={{ fontSize: 6.5, color: FAINT }}>{`${lines.length} ${lines.length === 1 ? 'parameter' : 'parameters'}`}</Text>
+        </View>
+      ) : null}
+      <View style={{ flexDirection: 'row', paddingHorizontal: 4, paddingTop: name ? 0 : 4, paddingBottom: 2, borderBottomWidth: 0.6, borderBottomColor: LINE }}>
         <HeadCell w={C.param}>Parameter</HeadCell>
         <View style={{ width: C.result, paddingRight: 7 }}>
           <HeadCell w={C.result - 7} align="right">Result</HeadCell>
@@ -135,11 +138,31 @@ function TestBlock({ name, lines, brand }: { name: string; lines: ReportLine[]; 
   );
 }
 
+// Consecutive single-parameter tests share one block (one column header) to keep the report dense.
+// The row is labelled with the test name, which is more familiar than the parameter code.
+function groupTests(tests: Array<{ name: string; lines: ReportLine[] }>): Array<{ name: string | null; lines: ReportLine[] }> {
+  const out: Array<{ name: string | null; lines: ReportLine[] }> = [];
+  let singles: ReportLine[] = [];
+  const flush = () => {
+    if (singles.length) out.push({ name: null, lines: singles });
+    singles = [];
+  };
+  for (const t of tests) {
+    if (t.lines.length === 1) singles.push({ ...t.lines[0]!, parameter: t.name });
+    else {
+      flush();
+      out.push({ name: t.name, lines: t.lines });
+    }
+  }
+  flush();
+  return out;
+}
+
 function PatientCard({ d }: { d: ReportData }) {
   const b = d.brand;
   return (
-    <View style={{ flexDirection: 'row', borderWidth: 0.8, borderColor: tint(b.primary, 0.75), borderRadius: 7, backgroundColor: tint(b.primary, 0.96), padding: 8 }}>
-      <View style={{ flexGrow: 1 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 0.8, borderColor: tint(b.primary, 0.75), borderRadius: 7, backgroundColor: tint(b.primary, 0.96), paddingVertical: 9, paddingLeft: 11, paddingRight: 9 }}>
+      <View style={{ flexGrow: 1, flexShrink: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
           <Text style={{ fontSize: 13, fontWeight: 800, color: INK }}>{d.patient.name}</Text>
           <View style={{ marginLeft: 7, backgroundColor: b.primary, borderRadius: 9999, paddingHorizontal: 6, paddingVertical: 1 }}>
@@ -151,15 +174,17 @@ function PatientCard({ d }: { d: ReportData }) {
             </View>
           ) : null}
         </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-          <KV k="MRN" v={d.patient.mrn} width={112} strong />
-          <KV k="Lab / order no." v={d.order.orderNo} width={112} strong />
-          <KV k="Referred by" v={d.patient.practitioner ?? 'Self'} width={112} />
-          <KV k="Specimen" v={d.order.specimenTypes.join(', ') || '-'} width={112} />
-          <KV k="Registered" v={d.order.createdAt} width={112} />
-          <KV k="Collected" v={d.order.collectedAt ?? '-'} width={112} />
-          <KV k="Received" v={d.order.receivedAt ?? '-'} width={112} />
-          <KV k="Reported" v={d.issuedAt} width={112} strong />
+        <View style={{ flexDirection: 'row' }}>
+          <KV k="MRN" v={d.patient.mrn} width={108} strong />
+          <KV k="Lab / order no." v={d.order.orderNo} width={108} strong />
+          <KV k="Referred by" v={d.patient.practitioner ?? 'Self'} width={108} />
+          <KV k="Specimen" v={d.order.specimenTypes.join(', ') || '-'} width={116} />
+        </View>
+        <View style={{ flexDirection: 'row', marginTop: 2 }}>
+          <KV k="Registered" v={d.order.createdAt} width={108} />
+          <KV k="Collected" v={d.order.collectedAt ?? '-'} width={108} />
+          <KV k="Received" v={d.order.receivedAt ?? '-'} width={108} />
+          <KV k="Reported" v={d.issuedAt} width={116} strong />
         </View>
         {d.patient.allergies ? <Text style={{ fontSize: 7, color: '#B91C1C', fontWeight: 600 }}>{`Known allergies: ${d.patient.allergies}`}</Text> : null}
       </View>
@@ -167,6 +192,8 @@ function PatientCard({ d }: { d: ReportData }) {
     </View>
   );
 }
+
+const rows = <T,>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
 function AbnormalSummary({ d }: { d: ReportData }) {
   const items = d.sections.flatMap((s) => s.tests.flatMap((t) => t.lines)).filter((l) => l.flag && l.flag !== 'N');
@@ -180,24 +207,36 @@ function AbnormalSummary({ d }: { d: ReportData }) {
   }
   const crit = items.filter((i) => i.critical).length;
   return (
-    <View wrap={false} style={{ marginTop: 6, borderWidth: 0.8, borderColor: '#FECACA', backgroundColor: '#FFF7F7', borderRadius: 6, padding: 6 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+    <View wrap={false} style={{ marginTop: 6, borderWidth: 0.8, borderColor: '#FECACA', backgroundColor: '#FFF7F7', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
         <Text style={{ fontSize: 8.4, fontWeight: 800, color: '#B91C1C', letterSpacing: 0.6 }}>ATTENTION</Text>
         <Text style={{ fontSize: 7.6, color: INK, marginLeft: 6 }}>
           {`${items.length} result${items.length === 1 ? '' : 's'} outside the reference range${crit ? `, ${crit} critical` : ''}`}
         </Text>
       </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-        {items.map((l, i) => {
-          const s = flagStyle(l.flag);
-          return (
-            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: tint(s.fg, 0.7), borderRadius: 9999, paddingHorizontal: 6, paddingVertical: 1.5, marginRight: 4, marginBottom: 3 }}>
-              <Text style={{ fontSize: 7.2, fontWeight: 800, color: s.fg }}>{`${s.sym} ${l.parameter} ${l.value}`}</Text>
-              <Text style={{ fontSize: 6.4, color: MUTED, marginLeft: 3 }}>{`${l.unit} • ${FLAG_LABEL[l.flag ?? ''] ?? ''}${l.reference ? ` (ref ${l.reference})` : ''}`}</Text>
-            </View>
-          );
-        })}
-      </View>
+      {rows(items, 3).map((row, r) => (
+        <View key={r} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: r ? 4 : 0 }}>
+          {[...row, ...Array<null>(3 - row.length).fill(null)].map((l, i) => {
+            if (!l) return <View key={i} style={{ width: 168 }} />;
+            const s = flagStyle(l.flag);
+            return (
+              <View
+                key={i}
+                style={{ width: 168, flexDirection: 'row', backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: tint(s.fg, 0.65), borderLeftWidth: 2.5, borderLeftColor: s.fg, borderRadius: 4, paddingVertical: 3, paddingHorizontal: 5 }}
+              >
+                <View style={{ flexGrow: 1, flexShrink: 1 }}>
+                  <Text style={{ fontSize: 7.4, fontWeight: 700, color: INK }}>{l.parameter}</Text>
+                  <Text style={{ fontSize: 6.2, color: MUTED, marginTop: 0.5 }}>{`${FLAG_LABEL[l.flag ?? ''] ?? ''}${l.reference ? `  •  ref ${l.reference}` : ''}`}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', marginLeft: 4 }}>
+                  <Text style={{ fontSize: 9, fontWeight: 800, color: s.fg }}>{`${s.sym} ${l.value}`}</Text>
+                  <Text style={{ fontSize: 5.8, color: MUTED }}>{formatUnit(l.unit)}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
@@ -245,15 +284,22 @@ function ReportDocument({ d }: { d: ReportData }) {
 
           {d.sections.map((dept) => (
             <View key={dept.department}>
-              <DeptHeader name={dept.department} count={dept.tests.length} brand={b} />
-              {dept.tests.map((t) => (
-                <TestBlock key={t.name} name={t.name} lines={t.lines} brand={b} />
-              ))}
+              {groupTests(dept.tests).map((g, gi) =>
+                gi === 0 ? (
+                  // The department heading always travels with its first block, never alone at a page bottom.
+                  <View key={gi} wrap={false}>
+                    <DeptHeader name={dept.department} count={dept.tests.length} brand={b} />
+                    <TestBlock name={g.name} lines={g.lines} brand={b} />
+                  </View>
+                ) : (
+                  <TestBlock key={gi} name={g.name} lines={g.lines} brand={b} />
+                ),
+              )}
             </View>
           ))}
 
           <View wrap={false} style={{ marginTop: 14 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               {d.incharge ? <SignatureCard s={d.incharge} brand={b} align="left" /> : <View />}
               <View style={{ alignItems: 'flex-end' }}>
                 {d.signers.map((s, i) => (

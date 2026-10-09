@@ -57,7 +57,7 @@ function Stamp({ status }: { status: string }) {
   return (
     <View style={{ borderWidth: 2, borderColor: s.fg, borderRadius: 6, padding: 2, alignSelf: 'flex-end' }}>
       <View style={{ borderWidth: 0.8, borderColor: s.fg, borderRadius: 4, backgroundColor: s.bg, paddingHorizontal: 12, paddingVertical: 3 }}>
-        <Text style={{ fontSize: 15, fontWeight: 800, color: s.fg, letterSpacing: 2.2, textAlign: 'center' }}>{s.label}</Text>
+        <Text style={{ fontSize: 12, fontWeight: 800, color: s.fg, letterSpacing: 2, textAlign: 'center' }}>{s.label}</Text>
       </View>
     </View>
   );
@@ -67,7 +67,7 @@ const C = { n: 24, desc: 279, price: 78, tax: 66, total: 92 } as const; // 539
 
 function TotalRow({ k, v, strong, color }: { k: string; v: string; strong?: boolean; color?: string }) {
   return (
-    <View style={{ flexDirection: 'row', paddingVertical: strong ? 4 : 2, borderTopWidth: strong ? 0.8 : 0, borderTopColor: LINE }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: strong ? 4 : 2, borderTopWidth: strong ? 0.8 : 0, borderTopColor: LINE }}>
       <Text style={{ fontSize: strong ? 9.5 : 8, fontWeight: strong ? 800 : 500, color: color ?? (strong ? INK : MUTED) }}>{k}</Text>
       <View style={{ flexGrow: 1 }} />
       <Text style={{ fontSize: strong ? 10.5 : 8.2, fontWeight: strong ? 800 : 600, color: color ?? INK }}>{v}</Text>
@@ -89,11 +89,11 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
             <View style={{ flexGrow: 1, borderWidth: 0.8, borderColor: tint(b.primary, 0.75), backgroundColor: tint(b.primary, 0.96), borderRadius: 7, padding: 8, marginRight: 8 }}>
               <Label>Billed to</Label>
               <Text style={{ fontSize: 13, fontWeight: 800, marginTop: 2, marginBottom: 5 }}>{d.patient.name}</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                <KV k="MRN" v={d.patient.mrn} width={92} strong />
-                <KV k="Order no." v={d.orderNo} width={92} strong />
-                <KV k="Mobile" v={d.patient.phone ?? '-'} width={92} />
-                <KV k="Referred by" v={d.patient.practitioner ?? 'Self'} width={92} />
+              <View style={{ flexDirection: 'row' }}>
+                <KV k="MRN" v={d.patient.mrn} width={86} strong />
+                <KV k="Order no." v={d.orderNo} width={86} strong />
+                <KV k="Mobile" v={d.patient.phone ?? '-'} width={86} />
+                <KV k="Referred by" v={d.patient.practitioner ?? 'Self'} width={86} />
               </View>
             </View>
             <View style={{ width: 170, borderRadius: 7, backgroundColor: b.primary, padding: 10 }}>
@@ -113,7 +113,7 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
           </View>
           {d.status === 'void' && d.voidReason ? <Text style={{ fontSize: 7.2, color: s.fg, marginTop: 2 }}>{`Voided: ${d.voidReason}`}</Text> : null}
 
-          <View style={{ marginTop: 6, borderWidth: 0.6, borderColor: LINE, borderRadius: 5 }}>
+          <View style={{ marginTop: 6, borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden' }}>
             <View style={{ flexDirection: 'row', backgroundColor: tint(b.primary, 0.92), paddingVertical: 4, paddingHorizontal: 4 }}>
               {(['#', 'Description', 'Price', 'Tax', 'Amount (PKR)'] as const).map((h, i) => (
                 <Text
@@ -140,13 +140,13 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
               {d.payments.length ? (
                 <View>
                   <Label>Payment history</Label>
-                  <View style={{ marginTop: 3, borderWidth: 0.6, borderColor: LINE, borderRadius: 5 }}>
+                  <View style={{ marginTop: 3, borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden' }}>
                     {d.payments.map((p, i) => (
                       <View key={i} style={{ flexDirection: 'row', paddingVertical: 3, paddingHorizontal: 5, backgroundColor: i % 2 ? SOFT : '#FFFFFF' }}>
                         <Text style={{ width: 92, fontSize: 7.2, color: MUTED }}>{p.when}</Text>
                         <Text style={{ width: 46, fontSize: 7.2, fontWeight: 700, color: p.kind === 'refund' ? '#B91C1C' : '#047857' }}>{p.kind === 'refund' ? 'Refund' : 'Payment'}</Text>
                         <Text style={{ width: 64, fontSize: 7.2 }}>{p.method === 'jazzcash' ? 'JazzCash' : p.method === 'easypaisa' ? 'Easypaisa' : p.method.charAt(0).toUpperCase() + p.method.slice(1).replace('_', ' ')}</Text>
-                        <Text style={{ width: 70, fontSize: 7, color: MUTED }}>{p.reference ?? '-'}</Text>
+                        <Text style={{ width: 70, fontSize: 7, color: MUTED }}>{p.reference ?? ''}</Text>
                         <View style={{ flexGrow: 1 }} />
                         <Text style={{ fontSize: 7.6, fontWeight: 700 }}>{`${p.kind === 'refund' ? '-' : ''}${pkr(p.amount)}`}</Text>
                       </View>

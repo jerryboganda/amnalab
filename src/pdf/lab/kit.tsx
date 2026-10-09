@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import type { ReactNode } from 'react';
 import { Fixed, Font, Image, QrCode, Text, View } from '@formepdf/react';
 import { Svg } from '../lib/pdf-svg.tsx';
-import { rangeGeometry, safeColor, tint } from './geometry.ts';
-export { rangeGeometry, safeColor, tint };
+import { formatUnit, rangeGeometry, ringPath, safeColor, tint } from './geometry.ts';
+export { formatUnit, rangeGeometry, ringPath, safeColor, tint };
 export type { RangeGeometry } from './geometry.ts';
 
 // ---- Fonts. Inter (SIL OFL) lives in assets/fonts; the path differs between source and the bundle.
@@ -204,14 +204,9 @@ export function Monogram({ size = 52, brand, initials }: { size?: number; brand:
   }
   return (
     <Svg width={size} height={size} viewBox="0 0 60 60">
-      <rect x={0} y={0} width={60} height={60} fill="#FFFFFF" />
-      <path d="M4 52 L22 8 L31 8 L46 45 L38 45 L26.5 16 L13 52 Z" fill={brand.primary} />
-      <path d="M17 38 L37 38 L34.5 32 L19.5 32 Z" fill={brand.primary} />
-      <path
-        d={`M56 18 C51 9 39 6 31 12 L35 17 C40 13 48 14 51 21 Z M51 39 C48 46 40 47 35 43 L31 48 C39 54 51 51 56 42 Z`}
-        fill={brand.secondary}
-      />
-      <path d="M42 30 C42 25 44 21 47 19 L51 21 C48 23 47 26 47 30 C47 34 48 37 51 39 L47 41 C44 39 42 35 42 30 Z" fill={brand.secondary} />
+      <path d={ringPath(37, 30, 22, 15.5, 38, 322)} fill={brand.secondary} />
+      <path d="M3 54 L21 6 L31 6 L49 54 L39.5 54 L26 16.5 L12.5 54 Z" fill={brand.primary} />
+      <path d="M15.5 41 L36.5 41 L34.2 34.5 L17.8 34.5 Z" fill={brand.primary} />
     </Svg>
   );
 }
@@ -255,11 +250,13 @@ export function LabHeader({
     <Fixed position="header">
       <View style={{ width: PAGE_W }}>
         <View style={{ height: 4, background: `linear-gradient(90deg, ${brand.primary}, ${brand.secondary})` }} />
-        <Svg width={PAGE_W} height={34} style={{ position: 'absolute', top: 4, left: 0 }}>
-          <path d="M0 0 L64 0 L0 30 Z" fill={tint(brand.primary, 0.55)} />
-          <path d="M0 0 L28 0 L0 13 Z" fill={brand.primary} />
-          <path d={`M${PAGE_W} 0 L${PAGE_W - 64} 0 L${PAGE_W} 30 Z`} fill={tint(brand.secondary, 0.6)} />
-          <path d={`M${PAGE_W} 0 L${PAGE_W - 28} 0 L${PAGE_W} 13 Z`} fill={brand.secondary} />
+        <Svg width={PAGE_W} height={46} style={{ position: 'absolute', top: 4, left: 0 }}>
+          <path d="M0 0 L12 0 L0 12 Z" fill={brand.primary} />
+          <path d="M0 20 L20 0 L33 0 L0 33 Z" fill={tint(brand.primary, 0.55)} />
+          <path d="M0 41 L41 0 L46 0 L0 46 Z" fill={tint(brand.primary, 0.78)} />
+          <path d={`M${PAGE_W} 0 L${PAGE_W - 12} 0 L${PAGE_W} 12 Z`} fill={brand.secondary} />
+          <path d={`M${PAGE_W} 20 L${PAGE_W - 20} 0 L${PAGE_W - 33} 0 L${PAGE_W} 33 Z`} fill={tint(brand.secondary, 0.55)} />
+          <path d={`M${PAGE_W} 41 L${PAGE_W - 41} 0 L${PAGE_W - 46} 0 L${PAGE_W} 46 Z`} fill={tint(brand.secondary, 0.78)} />
         </Svg>
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: GUTTER + 6, paddingTop: 12, paddingBottom: 8 }}>
           {b.logoDataUri ? <Image src={b.logoDataUri} height={52} style={{ maxWidth: 170 }} /> : <Monogram brand={brand} initials={b.name} />}
@@ -328,7 +325,7 @@ export function LabFooter({
   }
   return (
     <Fixed position="footer">
-      <View style={{ width: PAGE_W }}>
+      <View style={{ width: PAGE_W, paddingTop: 8 }}>
         {disclaimer ? (
           <View style={{ paddingHorizontal: GUTTER + 20, marginBottom: 3 }}>
             <Text style={{ fontSize: 6.2, color: MUTED, textAlign: 'center', lineHeight: 1.35 }}>{disclaimer}</Text>
@@ -363,10 +360,10 @@ export function KV({ k, v, width, strong }: { k: string; v: string; width: numbe
 
 export function VerifyQr({ url, code, brand, size = 54 }: { url: string; code: string; brand: Brand; size?: number }) {
   return (
-    <View style={{ alignItems: 'center', width: size + 10 }}>
+    <View style={{ alignItems: 'center', width: size + 16, marginLeft: 8, backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: LINE, borderRadius: 6, paddingTop: 5, paddingBottom: 4 }}>
       <QrCode data={url} size={size} color={INK} />
-      <Text style={{ fontSize: 5.8, color: MUTED, marginTop: 2 }}>Scan to verify</Text>
-      <Text style={{ fontSize: 6, fontWeight: 700, color: brand.primary }}>{code}</Text>
+      <Text style={{ fontSize: 5.6, color: MUTED, marginTop: 3 }}>Scan to verify</Text>
+      <Text style={{ fontSize: 6, fontWeight: 700, color: brand.primary, letterSpacing: 0.4 }}>{code}</Text>
     </View>
   );
 }
@@ -382,11 +379,11 @@ export interface SignerView {
 export function SignatureCard({ s, brand, align }: { s: SignerView; brand: Brand; align: 'left' | 'right' }) {
   const items = align === 'right' ? 'flex-end' : 'flex-start';
   return (
-    <View style={{ width: 200, alignItems: items }}>
-      <View style={{ height: 34, justifyContent: 'flex-end', alignItems: items }}>
+    <View style={{ width: 210, alignItems: items }}>
+      <View style={{ height: 36, justifyContent: 'flex-end', alignItems: items }}>
         {s.signatureDataUri ? <Image src={s.signatureDataUri} height={32} /> : null}
       </View>
-      <View style={{ width: 150, height: 0.8, backgroundColor: LINE, marginVertical: 2 }} />
+      <View style={{ width: 160, height: 0.8, backgroundColor: FAINT, marginTop: 2, marginBottom: 3 }} />
       <Text style={{ fontSize: 9, fontWeight: 800, color: brand.primary }}>{s.name}</Text>
       {s.qualifications ? <Text style={{ fontSize: 6.8, color: INK, textAlign: align }}>{s.qualifications}</Text> : null}
       <Text style={{ fontSize: 6.3, fontWeight: 700, color: brand.secondary, letterSpacing: 0.8, marginTop: 1 }}>{s.label.toUpperCase()}</Text>
