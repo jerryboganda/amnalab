@@ -176,8 +176,8 @@ export function DeptHeader({ name, count, brand }: { name: string; count: number
         borderRadius: 4,
         paddingVertical: 4,
         paddingHorizontal: 6,
-        marginTop: 9,
-        marginBottom: 3,
+        marginTop: 7,
+        marginBottom: 2,
       }}
     >
       <Svg width={18} height={18} viewBox="-2 -2 18 18">
@@ -380,8 +380,8 @@ export function SignatureCard({ s, brand, align }: { s: SignerView; brand: Brand
   const items = align === 'right' ? 'flex-end' : 'flex-start';
   return (
     <View style={{ width: 210, alignItems: items }}>
-      <View style={{ height: 36, justifyContent: 'flex-end', alignItems: items }}>
-        {s.signatureDataUri ? <Image src={s.signatureDataUri} height={32} /> : null}
+      <View style={{ height: 30, justifyContent: 'flex-end', alignItems: items }}>
+        {s.signatureDataUri ? <Image src={s.signatureDataUri} height={28} style={{ maxWidth: 160 }} /> : null}
       </View>
       <View style={{ width: 160, height: 0.8, backgroundColor: FAINT, marginTop: 2, marginBottom: 3 }} />
       <Text style={{ fontSize: 9, fontWeight: 800, color: brand.primary }}>{s.name}</Text>

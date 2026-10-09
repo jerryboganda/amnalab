@@ -81,13 +81,21 @@ function ResultRow({ l, i, brand }: { l: ReportLine; i: number; brand: Brand }) 
   const s = flagStyle(l.flag);
   const abnormal = l.flag != null && l.flag !== 'N';
   return (
-    <View style={{ backgroundColor: i % 2 === 1 ? SOFT : '#FFFFFF', paddingVertical: 2.6, paddingHorizontal: 4 }} wrap={false}>
+    <View style={{ backgroundColor: i % 2 === 1 ? SOFT : '#FFFFFF', paddingVertical: 2.1, paddingHorizontal: 4 }} wrap={false}>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <Text style={{ width: C.param, fontSize: 8.2, color: INK, fontWeight: abnormal ? 600 : 400 }}>{l.parameter}</Text>
-        <View style={{ width: C.result, paddingRight: 7 }}>
-          <Text style={{ fontSize: 8.8, fontWeight: 800, color: abnormal ? s.fg : INK, textAlign: 'right' }}>{l.value}</Text>
-        </View>
-        <Text style={{ width: C.unit, fontSize: 7, color: MUTED }}>{formatUnit(l.unit)}</Text>
+        {l.valueNum != null ? (
+          <>
+            <View style={{ width: C.result, paddingRight: 7 }}>
+              <Text style={{ fontSize: 8.8, fontWeight: 800, color: abnormal ? s.fg : INK, textAlign: 'right' }}>{l.value}</Text>
+            </View>
+            <Text style={{ width: C.unit, fontSize: 7, color: MUTED }}>{formatUnit(l.unit)}</Text>
+          </>
+        ) : (
+          <View style={{ width: C.result + C.unit, paddingLeft: 10 }}>
+            <Text style={{ fontSize: 8.4, fontWeight: 700, color: abnormal ? s.fg : INK }}>{l.unit ? `${l.value} ${formatUnit(l.unit)}` : l.value}</Text>
+          </View>
+        )}
         <Text style={{ width: C.ref, fontSize: 7.2, color: INK }}>{l.reference}</Text>
         <View style={{ width: C.bar }}>
           <RangeBar value={l.valueNum} low={l.refLow} high={l.refHigh} code={l.flag} brand={brand} width={C.bar - 6} />
@@ -112,7 +120,7 @@ function ResultRow({ l, i, brand }: { l: ReportLine; i: number; brand: Brand }) 
 function TestBlock({ name, lines, brand }: { name: string | null; lines: ReportLine[]; brand: Brand }) {
   const graphic = lines.some((l) => l.valueNum != null);
   return (
-    <View wrap={lines.length > 16} style={{ marginTop: 5, borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden', paddingBottom: 1.5 }}>
+    <View wrap={lines.length > 8} style={{ marginTop: 5, borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden', paddingBottom: 1.5 }}>
       {name ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingTop: 4, paddingBottom: 3 }}>
           <Text style={{ fontSize: 9, fontWeight: 700, color: INK }}>{name}</Text>
@@ -206,6 +214,7 @@ function AbnormalSummary({ d }: { d: ReportData }) {
     );
   }
   const crit = items.filter((i) => i.critical).length;
+  const shown = items.slice(0, 20);
   return (
     <View wrap={false} style={{ marginTop: 6, borderWidth: 0.8, borderColor: '#FECACA', backgroundColor: '#FFF7F7', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 6 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
@@ -214,29 +223,27 @@ function AbnormalSummary({ d }: { d: ReportData }) {
           {`${items.length} result${items.length === 1 ? '' : 's'} outside the reference range${crit ? `, ${crit} critical` : ''}`}
         </Text>
       </View>
-      {rows(items, 3).map((row, r) => (
-        <View key={r} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: r ? 4 : 0 }}>
-          {[...row, ...Array<null>(3 - row.length).fill(null)].map((l, i) => {
-            if (!l) return <View key={i} style={{ width: 168 }} />;
+      {rows(shown, 4).map((row, r) => (
+        <View key={r} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: r ? 3 : 0 }}>
+          {[...row, ...Array<null>(4 - row.length).fill(null)].map((l, i) => {
+            if (!l) return <View key={i} style={{ width: 126 }} />;
             const s = flagStyle(l.flag);
             return (
               <View
                 key={i}
-                style={{ width: 168, flexDirection: 'row', backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: tint(s.fg, 0.65), borderLeftWidth: 2.5, borderLeftColor: s.fg, borderRadius: 4, paddingVertical: 3, paddingHorizontal: 5 }}
+                style={{ width: 126, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: tint(s.fg, 0.65), borderLeftWidth: 2.5, borderLeftColor: s.fg, borderRadius: 3.5, paddingVertical: 2.4, paddingHorizontal: 4 }}
               >
-                <View style={{ flexGrow: 1, flexShrink: 1 }}>
-                  <Text style={{ fontSize: 7.4, fontWeight: 700, color: INK }}>{l.parameter}</Text>
-                  <Text style={{ fontSize: 6.2, color: MUTED, marginTop: 0.5 }}>{`${FLAG_LABEL[l.flag ?? ''] ?? ''}${l.reference ? `  •  ref ${l.reference}` : ''}`}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', marginLeft: 4 }}>
-                  <Text style={{ fontSize: 9, fontWeight: 800, color: s.fg }}>{`${s.sym} ${l.value}`}</Text>
-                  <Text style={{ fontSize: 5.8, color: MUTED }}>{formatUnit(l.unit)}</Text>
-                </View>
+                <Text style={{ width: 78, fontSize: 6.9, fontWeight: 600, color: INK, textOverflow: 'ellipsis' } as never}>{l.parameter.replace(' (calculated)', '')}</Text>
+                <View style={{ flexGrow: 1 }} />
+                <Text style={{ fontSize: 7.8, fontWeight: 800, color: s.fg }}>{`${s.sym} ${l.value}`}</Text>
               </View>
             );
           })}
         </View>
       ))}
+      {items.length > shown.length ? (
+        <Text style={{ fontSize: 6.6, color: MUTED, marginTop: 4 }}>{`+ ${items.length - shown.length} more flagged results are highlighted in the tables below.`}</Text>
+      ) : null}
     </View>
   );
 }
@@ -286,8 +293,8 @@ function ReportDocument({ d }: { d: ReportData }) {
             <View key={dept.department}>
               {groupTests(dept.tests).map((g, gi) =>
                 gi === 0 ? (
-                  // The department heading always travels with its first block, never alone at a page bottom.
-                  <View key={gi} wrap={false}>
+                  // The department heading travels with its first block; a large first block may still break across pages.
+                  <View key={gi} wrap={g.lines.length > 8}>
                     <DeptHeader name={dept.department} count={dept.tests.length} brand={b} />
                     <TestBlock name={g.name} lines={g.lines} brand={b} />
                   </View>
@@ -298,7 +305,7 @@ function ReportDocument({ d }: { d: ReportData }) {
             </View>
           ))}
 
-          <View wrap={false} style={{ marginTop: 14 }}>
+          <View wrap={false} style={{ marginTop: 8 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               {d.incharge ? <SignatureCard s={d.incharge} brand={b} align="left" /> : <View />}
               <View style={{ alignItems: 'flex-end' }}>

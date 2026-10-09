@@ -3,11 +3,12 @@ import type { Router } from '../http.ts';
 import { RawResponse, arr, badRequest, bool, conflict, forbidden, int, intParam, intQuery, invalid, json, notFound, oneOf, optStr, str } from '../http.ts';
 import { audit } from '../audit.ts';
 import { requirePerm, visibleBranches, assertBranch, type AuthUser } from '../security.ts';
-import { nextSequence, pad, businessDate, nowIso, toPaisa, dayStartUtc, dayEndUtc } from '../util.ts';
+import { nextSequence, pad, businessDate, nowIso, toPaisa, dayStartUtc, dayEndUtc, ageInYears } from '../util.ts';
 import { patientVisible } from './patients.ts';
 import { assertDayOpen, computeInvoice, invoiceNumber } from '../services/billing-core.ts';
 import { priceFor } from '../services/pricing.ts';
 import { specimenLabelSvg } from '../services/labels.ts';
+import { specimenLabelHtml } from '../services/label-html.ts';
 import { completeOrderIfDone } from './results.ts';
 
 const PRIORITIES = ['routine', 'urgent', 'stat'] as const;
@@ -393,25 +394,29 @@ export function registerOrders(r: Router, db: DatabaseSync) {
     const sp = loadSpecimen(db, actor, intParam(ctx.params.id!, 'id'));
     const info = db
       .prepare(
-        `SELECT p.full_name, p.mrn, p.gender, p.dob, b.name AS branch_name FROM orders o
+        `SELECT p.full_name, p.mrn, p.gender, p.dob, p.age_years_at_registration, o.priority, b.code AS branch_code FROM orders o
          JOIN patients p ON p.id = o.patient_id JOIN branches b ON b.id = o.branch_id WHERE o.id = ?`,
       )
-      .get(sp.order_id) as { full_name: string; mrn: string; gender: string; dob: string | null; branch_name: string };
+      .get(sp.order_id) as { full_name: string; mrn: string; gender: string; dob: string | null; age_years_at_registration: number | null; priority: string; branch_code: string };
     const tests = db
-      .prepare(`SELECT t.name FROM order_items oi JOIN tests t ON t.id = oi.test_id WHERE oi.specimen_id = ? ORDER BY t.name`)
-      .all(sp.id) as Array<{ name: string }>;
-    const svg = await specimenLabelSvg(sp.accession_no);
-    const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(sp.accession_no)}</title>
-      <style>body{font-family:Arial,sans-serif;margin:0;padding:6px;width:260px}
-      .l{font-size:11px;line-height:1.35}.a{font-weight:700;font-size:13px}@media print{@page{size:50mm 25mm;margin:2mm}}</style>
-      </head><body>
-      <div style="display:flex;gap:6px;align-items:center">${svg.replace('<svg', '<svg style="width:70px;height:70px"')}
-      <div class="l"><div class="a">${esc(sp.accession_no)}</div>
-      <div>${esc(info.full_name)} (${esc(info.mrn)})</div>
-      <div>${esc(sp.specimen_type)} | ${esc(info.branch_name)}</div>
-      <div>${esc(tests.map((t) => t.name).join(', ').slice(0, 120))}</div></div></div>
-      <script>window.onload=()=>window.print()</script></body></html>`;
+      .prepare(`SELECT t.code FROM order_items oi JOIN tests t ON t.id = oi.test_id WHERE oi.specimen_id = ? AND oi.status <> 'cancelled' ORDER BY t.code`)
+      .all(sp.id) as Array<{ code: string }>;
+    const age = info.dob ? `${ageInYears(info.dob)}y` : info.age_years_at_registration != null ? `${info.age_years_at_registration}y` : '';
+    const collected = (sp as Record<string, unknown>).collected_at as string | null;
+    const html = specimenLabelHtml({
+      accession: sp.accession_no,
+      patientName: info.full_name,
+      mrn: info.mrn,
+      sexAge: [info.gender, age].filter(Boolean).join(' / '),
+      specimenType: sp.specimen_type,
+      priority: info.priority,
+      collectedAt: collected
+        ? new Date(collected).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+        : null,
+      testCodes: tests.map((t) => t.code),
+      branchCode: info.branch_code,
+      qrSvg: await specimenLabelSvg(sp.accession_no),
+    });
     return new RawResponse('text/html; charset=utf-8', html, { 'Content-Security-Policy': PRINT_CSP });
   });
 
