@@ -172,7 +172,7 @@ function Branches() {
       </Panel>
       <Panel title="Branches">
         <Table
-          head={['Code', 'Name', 'Phone', 'Email', 'Logo', 'Background', 'Active']}
+          head={['Code', 'Name', 'Phone', 'Email', 'Logo', 'Background', 'Active', '']}
           rows={rows.map((b) => [
             <code key="c">{String(b.code)}</code>,
             String(b.name),
@@ -181,6 +181,9 @@ function Branches() {
             b.has_logo ? 'yes' : 'no',
             b.has_background ? 'yes' : 'no',
             b.is_active ? 'yes' : 'no',
+            <button key="t" disabled={act.busy} onClick={async () => { await act.run(() => patch(`/api/admin/branches/${b.id}`, { isActive: !b.is_active }), 'Branch updated'); await load(); }}>
+              {b.is_active ? 'Deactivate' : 'Activate'}
+            </button>,
           ])}
         />
       </Panel>

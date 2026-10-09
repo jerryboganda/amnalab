@@ -117,6 +117,19 @@ export function App() {
     setStatus('login');
   }
 
+  async function changePassword() {
+    const currentPassword = window.prompt('Current password');
+    if (!currentPassword) return;
+    const newPassword = window.prompt('New password (10+ characters, letters and digits)');
+    if (!newPassword) return;
+    try {
+      await post('/api/auth/change-password', { currentPassword, newPassword });
+      window.alert('Password changed.');
+    } catch (e) {
+      window.alert((e as Error).message);
+    }
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="Main navigation">
@@ -142,6 +155,7 @@ export function App() {
               ))}
             </select>
           </label>
+          <button className="ghost" onClick={() => void changePassword()}>Change password</button>
           <button className="ghost" onClick={signOut}>Sign out</button>
         </div>
       </aside>
