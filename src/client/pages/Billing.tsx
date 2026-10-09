@@ -252,6 +252,13 @@ function DailyClosing({ s }: { s: Session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.branchId, date]);
 
+  async function reopen() {
+    const reason = window.prompt('Reason for reopening this day (5+ characters)');
+    if (!reason) return;
+    await act.run(() => post('/api/billing/closing/reopen', { branchId: s.branchId, date, reason }), 'Day reopened');
+    await load();
+  }
+
   async function close() {
     await act.run(() => post('/api/billing/closing', { branchId: s.branchId, date, countedPkr: Number(counted) }), 'Day closed');
     await load();
@@ -273,6 +280,7 @@ function DailyClosing({ s }: { s: Session }) {
       {data.closing ? (
         <Notice kind={data.closing.variance_paisa === 0 ? 'ok' : 'warn'}>
           Closed. Counted PKR {pkr(data.closing.counted_paisa / 100)}, variance PKR {pkr(data.closing.variance_paisa / 100)}.
+          {s.can('billing.approve_refund') ? <> <button disabled={act.busy} onClick={() => void reopen()}>Reopen day</button></> : null}
         </Notice>
       ) : s.can('billing.close') ? (
         <div className="row-actions">

@@ -5,7 +5,7 @@ import { audit } from '../audit.ts';
 import { requirePerm, visibleBranches, assertBranch, type AuthUser } from '../security.ts';
 import { nextSequence, pad, businessDate, nowIso, toPaisa, dayStartUtc, dayEndUtc } from '../util.ts';
 import { patientVisible } from './patients.ts';
-import { computeInvoice, invoiceNumber } from '../services/billing-core.ts';
+import { assertDayOpen, computeInvoice, invoiceNumber } from '../services/billing-core.ts';
 import { priceFor } from '../services/pricing.ts';
 import { specimenLabelSvg } from '../services/labels.ts';
 import { completeOrderIfDone } from './results.ts';
@@ -101,6 +101,7 @@ export function registerOrders(r: Router, db: DatabaseSync) {
     const paidPaisa = payment ? toPaisa(Number(payment.amountPkr ?? 0)) : 0;
     if (!Number.isFinite(paidPaisa)) throw invalid('Payment amount must be a number');
     if (paidPaisa < 0 || paidPaisa > totals.total) throw invalid('Initial payment cannot exceed the invoice total');
+    if (paidPaisa > 0) assertDayOpen(db, branchId, today);
     if (paidPaisa > 0 && payment && payment.method !== 'cash' && !optStr(payment, 'reference', 80)) {
       throw invalid('A reference number is required for non-cash payments');
     }

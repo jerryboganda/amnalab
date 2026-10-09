@@ -5,6 +5,7 @@ import { audit } from '../audit.ts';
 import { assertBranch, requirePerm, visibleBranches, type AuthUser } from '../security.ts';
 import { businessDate, dayEndUtc, dayStartUtc, fmtPkr, fromPaisa, nowIso, toPaisa } from '../util.ts';
 import { verifyApprover } from '../services/approval.ts';
+import { assertDayOpen } from '../services/billing-core.ts';
 import { PRINT_CSP } from './orders.ts';
 
 const METHODS = ['cash', 'card', 'bank_transfer', 'jazzcash', 'easypaisa'] as const;
@@ -63,12 +64,6 @@ function refreshInvoice(db: DatabaseSync, invoiceId: number): void {
   db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, invoiceId);
 }
 
-// Once a cash day is closed, no more money can be recorded against it.
-function assertDayOpen(db: DatabaseSync, branchId: number, date: string): void {
-  if (db.prepare('SELECT id FROM cash_closings WHERE branch_id = ? AND business_date = ?').get(branchId, date)) {
-    throw conflict('Today has already been closed for this branch. Ask a branch manager.');
-  }
-}
 
 function closingFigures(db: DatabaseSync, branchId: number, date: string) {
   const rows = db
@@ -292,6 +287,21 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     ).run(branchId, date, expected, counted, variance, actor.id);
     audit(db, { actor, branchId, action: 'cash.close', entity: 'cash_closing', entityId: date, after: { expectedPkr: fromPaisa(expected), countedPkr: fromPaisa(counted), variancePkr: fromPaisa(variance) } });
     return json({ ok: true, expectedPkr: fromPaisa(expected), countedPkr: fromPaisa(counted), variancePkr: fromPaisa(variance) }, 201);
+  });
+
+  // A closed day can be reopened by a manager (same permission as refunds) with a reason; it is audited.
+  r.post('/api/billing/closing/reopen', (ctx) => {
+    const actor = ctx.user!;
+    requirePerm(actor, 'billing.approve_refund');
+    const branchId = int(ctx.body, 'branchId', { min: 1 });
+    assertBranch(actor, branchId);
+    const date = str(ctx.body, 'date', { max: 10, min: 10 });
+    const reason = str(ctx.body, 'reason', { max: 300, min: 5 });
+    const closing = db.prepare('SELECT * FROM cash_closings WHERE branch_id = ? AND business_date = ?').get(branchId, date);
+    if (!closing) throw conflict('This day is not closed');
+    db.prepare('DELETE FROM cash_closings WHERE branch_id = ? AND business_date = ?').run(branchId, date);
+    audit(db, { actor, branchId, action: 'cash.reopen', entity: 'cash_closing', entityId: date, before: closing, after: { reason } });
+    return { ok: true };
   });
 
 }

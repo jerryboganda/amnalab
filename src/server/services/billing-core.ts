@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { badRequest, forbidden, invalid } from '../http.ts';
+import { badRequest, conflict, forbidden, invalid } from '../http.ts';
 import { getSettings } from './settings.ts';
 import { priceFor } from './pricing.ts';
 import { verifyApprover } from './approval.ts';
@@ -68,4 +68,11 @@ export function todayIn(branchTimezone: string): string {
 
 export function ensureCanWrite(actor: AuthUser, perm: 'billing.write' | 'billing.close'): void {
   if (!actor.perms.has(perm)) throw forbidden(perm);
+}
+
+// Once a cash day is closed, no more money can be recorded against it (a manager can reopen it).
+export function assertDayOpen(db: DatabaseSync, branchId: number, date: string): void {
+  if (db.prepare('SELECT id FROM cash_closings WHERE branch_id = ? AND business_date = ?').get(branchId, date)) {
+    throw conflict('The cash for this day has already been closed for this branch. A branch manager can reopen the day.');
+  }
 }

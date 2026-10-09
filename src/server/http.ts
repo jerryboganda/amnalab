@@ -127,11 +127,15 @@ export function readBody(req: IncomingMessage): Promise<any> {
     });
     req.on('end', () => {
       if (size === 0) return resolve({});
+      let parsed: unknown;
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {
-        reject(badRequest('Body must be valid JSON'));
+        return reject(badRequest('Body must be valid JSON'));
       }
+      if (parsed === null) return resolve({});
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) return reject(badRequest('Body must be a JSON object'));
+      resolve(parsed);
     });
     req.on('error', reject);
   });
