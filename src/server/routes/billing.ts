@@ -10,6 +10,8 @@ import { PRINT_CSP } from './orders.ts';
 import { config, loadFileConfig } from '../config.ts';
 import { branchDesign } from '../services/doc-branch.ts';
 import { renderInvoicePdf } from '../services/invoice-pdf.tsx';
+import { receiptHtml } from '../services/receipt-html.ts';
+import QRCode from 'qrcode';
 
 const METHODS = ['cash', 'card', 'bank_transfer', 'jazzcash', 'easypaisa'] as const;
 
@@ -223,43 +225,41 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     return invoiceDto(db, id, actor);
   });
 
-  r.get('/api/invoices/:id/receipt', (ctx) => {
+  r.get('/api/invoices/:id/receipt', async (ctx) => {
     const user = ctx.user!;
     requirePerm(user, 'billing.read');
-    const dto = invoiceDto(db, intParam(ctx.params.id!, 'id'), user);
-    const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-    const lines = (dto.lines as Array<Record<string, any>>)
-      .map((l) => `<tr><td>${esc(l.description)}</td><td style="text-align:right">${fmtPkr(Number(l.unit_price_paisa))}</td></tr>`)
-      .join('');
-    const pays = (dto.payments as Array<Record<string, any>>)
-      .map((p) => `<tr><td>${esc(p.kind === 'refund' ? 'Refund' : 'Paid')} ${esc(p.method)} ${esc(p.reference ?? '')}</td><td style="text-align:right">${p.kind === 'refund' ? '-' : ''}${fmtPkr(Number(p.amount_paisa))}</td></tr>`)
-      .join('');
+    const id = intParam(ctx.params.id!, 'id');
+    const dto = invoiceDto(db, id, user);
+    const row = invoiceRow(db, id)!;
     const design = branchDesign(db, Number(dto.branchId));
-    const brand = design.brand.primary;
-    const statusLabel = ({ paid: 'PAID', partially_paid: 'PARTIALLY PAID', issued: 'PAYMENT DUE', void: 'VOID' } as Record<string, string>)[String(dto.status)] ?? String(dto.status);
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(dto.invoiceNo)}</title>
-      <style>body{font-family:'Inter','Segoe UI',Arial,sans-serif;width:280px;margin:0;padding:8px;font-size:11.5px;color:#0f172a}table{width:100%;border-collapse:collapse}
-      td{padding:2px 0;vertical-align:top}.r{text-align:right}.t{text-align:center;font-weight:800;font-size:15px;color:${brand};letter-spacing:.3px}
-      .m{text-align:center;color:#64748b;font-size:10.5px}.b{border-top:1px dashed #94a3b8;margin:7px 0}.k{color:#64748b}
-      .tot td{font-size:14px;font-weight:800;padding-top:4px}.st{margin:8px auto 2px;border:2px solid ${brand};border-radius:6px;padding:4px;text-align:center;font-weight:800;letter-spacing:2px;color:${brand}}
-      @media print{@page{size:80mm auto;margin:2mm}}</style></head><body>
-      <div class="t">${esc(String(dto.branchName).toUpperCase())}</div>
-      ${design.branch.phone ? `<div class="m">Ph: ${esc(design.branch.phone)}</div>` : ''}
-      <div class="b"></div>
-      <table><tr><td class="k">Receipt</td><td class="r"><b>${esc(dto.invoiceNo)}</b></td></tr>
-      <tr><td class="k">Order</td><td class="r">${esc(dto.orderNo)}</td></tr>
-      <tr><td class="k">Date</td><td class="r">${esc(new Date(String(dto.createdAt)).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' }))}</td></tr>
-      <tr><td class="k">Patient</td><td class="r">${esc(dto.patient.name)}<br><span class="k">${esc(dto.patient.mrn)}</span></td></tr></table>
-      <div class="b"></div><table>${lines}</table><div class="b"></div>
-      <table><tr><td class="k">Subtotal</td><td class="r">${fmtPkr(toPaisa(dto.subtotalPkr))}</td></tr>
-      ${dto.discountPkr > 0 ? `<tr><td class="k">Discount${dto.discountReason ? ` (${esc(dto.discountReason)})` : ''}</td><td class="r">-${fmtPkr(toPaisa(dto.discountPkr))}</td></tr>` : ''}
-      <tr><td class="k">Tax</td><td class="r">${fmtPkr(toPaisa(dto.taxPkr))}</td></tr>
-      <tr class="tot"><td>TOTAL (PKR)</td><td class="r">${fmtPkr(toPaisa(dto.totalPkr))}</td></tr></table>
-      ${pays ? `<div class="b"></div><table>${pays}</table>` : ''}
-      <table class="tot"><tr><td>Balance due</td><td class="r">${fmtPkr(toPaisa(dto.balancePkr))}</td></tr></table>
-      <div class="st">${esc(statusLabel)}</div>
-      <div class="m">Thank you for choosing ${esc(dto.branchName)}</div>
-      <script>window.onload=()=>window.print()</script></body></html>`;
+    const base = loadFileConfig().publicBaseUrl ?? `http://${config.host}:${config.port}`;
+    const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const qrSvg = await QRCode.toString(`${base}/#/verify-invoice/${row.verification_code}`, { type: 'svg', errorCorrectionLevel: 'M', margin: 0 });
+    const html = receiptHtml({
+      lab: { name: design.branch.name, motto: design.branch.motto, address: design.branch.address, phone: design.branch.phone, timings: design.branch.timings, brand: design.brand.primary },
+      invoiceNo: String(dto.invoiceNo),
+      orderNo: String(dto.orderNo),
+      issuedAt: when(String(dto.createdAt)),
+      printedAt: when(new Date().toISOString()),
+      status: String(dto.status),
+      patient: { name: dto.patient.name, mrn: dto.patient.mrn, practitioner: (row.practitioner_name as string | null) ?? null },
+      lines: (dto.lines as Array<Record<string, any>>).map((l) => ({ description: String(l.description), amountPaisa: Number(l.line_total_paisa) })),
+      subtotalPaisa: Number(row.subtotal_paisa),
+      discountPaisa: Number(row.discount_paisa),
+      discountReason: (row.discount_reason as string | null) ?? null,
+      taxPaisa: Number(row.tax_paisa),
+      totalPaisa: Number(row.total_paisa),
+      payments: (dto.payments as Array<Record<string, any>>).map((p) => ({
+        when: when(String(p.created_at)),
+        kind: String(p.kind),
+        method: String(p.method),
+        reference: (p.reference as string | null) ?? null,
+        amountPaisa: Number(p.amount_paisa),
+      })),
+      balancePaisa: toPaisa(dto.balancePkr),
+      verifyCode: String(row.verification_code ?? ''),
+      qrSvg,
+    });
     return new RawResponse('text/html; charset=utf-8', html, { 'Content-Security-Policy': PRINT_CSP });
   });
 
