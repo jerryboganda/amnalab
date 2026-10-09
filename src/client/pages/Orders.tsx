@@ -48,6 +48,7 @@ function OrderList({ s }: { s: Session }) {
             <option value="confirmed">Confirmed</option>
             <option value="in_progress">In progress</option>
             <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
           </select>
           {s.can('orders.write') ? <button className="primary" onClick={() => setCreating(!creating)}>{creating ? 'Close' : 'New order'}</button> : null}
         </div>
@@ -368,7 +369,10 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
                 <button onClick={() => void specimenAction(sp.id, 'recollect', {}, 'New specimen requested for recollection')}>Recollect</button>
               ) : null}
               {['received', 'processing'].includes(sp.status) && s.can('specimens.write') && order.items.filter((i) => i.specimen_id === sp.id).every((i) => i.status === 'completed' || i.status === 'cancelled') ? (
-                <button onClick={() => void specimenAction(sp.id, 'store', { disposition: 'stored' }, 'Stored')}>Store</button>
+                <>
+                  <button onClick={() => void specimenAction(sp.id, 'store', { disposition: 'stored' }, 'Stored')}>Store</button>
+                  <button onClick={() => void specimenAction(sp.id, 'store', { disposition: 'disposed' }, 'Disposed')}>Dispose</button>
+                </>
               ) : null}
               {s.can('specimens.write') ? <button onClick={() => window.open(`/api/specimens/${sp.id}/label`, '_blank', 'noopener')}>Label</button> : null}
             </span>,

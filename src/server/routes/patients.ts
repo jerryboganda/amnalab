@@ -263,7 +263,19 @@ export function registerPatients(r: Router, db: DatabaseSync) {
     const id = intParam(ctx.params.id!, 'id');
     requireVisible(db, user, id);
     const code = ctx.query.get('parameter');
-    if (!code) throw badRequest('parameter (parameter code) is required');
+    if (!code) {
+      // No parameter given: list the numeric parameters this patient has authorized results for.
+      const parameters = db
+        .prepare(
+          `SELECT tp.code, tp.name, r.unit, COUNT(*) AS n
+           FROM results r JOIN test_parameters tp ON tp.id = r.parameter_id
+           JOIN order_items oi ON oi.id = r.order_item_id JOIN orders o ON o.id = oi.order_id
+           WHERE o.patient_id = ? AND r.status = 'authorized' AND r.value_numeric IS NOT NULL
+           GROUP BY tp.code, tp.name, r.unit ORDER BY tp.name`,
+        )
+        .all(id);
+      return { parameters };
+    }
     const rows = db
       .prepare(
         `SELECT o.created_at AS date, r.value_numeric AS value, r.unit, r.flag, t.code AS test_code, tp.code AS parameter_code

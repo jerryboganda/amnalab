@@ -353,6 +353,15 @@ export function registerOrders(r: Router, db: DatabaseSync) {
       db.prepare("UPDATE order_items SET status = 'cancelled' WHERE id = ?").run(itemId);
       db.prepare("UPDATE results SET status = 'cancelled', cancel_reason = ? WHERE order_item_id = ? AND status <> 'authorized'").run(reason, itemId);
       audit(db, { actor, branchId: item.branch_id, action: 'order_item.cancel', entity: 'order_item', entityId: itemId, after: { reason } });
+      // Nothing left to bill: void the invoice when no money is held against it. If money was paid, a manager refunds it first.
+      const open = db.prepare("SELECT COUNT(*) AS n FROM order_items WHERE order_id = ? AND status <> 'cancelled'").get(item.order_id) as { n: number };
+      const inv = db.prepare('SELECT id, status, paid_paisa, refunded_paisa FROM invoices WHERE order_id = ?').get(item.order_id) as
+        | { id: number; status: string; paid_paisa: number; refunded_paisa: number }
+        | undefined;
+      if (open.n === 0 && inv && inv.status !== 'void' && inv.paid_paisa === inv.refunded_paisa) {
+        db.prepare("UPDATE invoices SET status = 'void', voided_by = ?, voided_at = ?, void_reason = ? WHERE id = ?").run(actor.id, nowIso(), 'Every test on the order was cancelled', inv.id);
+        audit(db, { actor, branchId: item.branch_id, action: 'invoice.void', entity: 'invoice', entityId: inv.id, after: { reason: 'Every test on the order was cancelled', automatic: true } });
+      }
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');

@@ -330,6 +330,7 @@ function PatientDetail({
           <p className="muted small">Messages are only queued for channels the patient has agreed to.</p>
         </Panel>
       </div>
+      <Trends id={id} />
       <Panel title="Previous investigations">
         <Table
           head={['Order', 'Date', 'Tests', 'Status']}
@@ -343,6 +344,38 @@ function PatientDetail({
         />
       </Panel>
     </>
+  );
+}
+
+// Numeric results over time for one parameter, from the patient's authorized reports.
+function Trends({ id }: { id: number }) {
+  const [params, setParams] = useState<Array<{ code: string; name: string; unit: string | null; n: number }>>([]);
+  const [code, setCode] = useState('');
+  const [points, setPoints] = useState<Array<{ date: string; value: number; unit: string | null; flag: string | null }>>([]);
+  useEffect(() => {
+    get<{ parameters: typeof params }>(`/api/patients/${id}/trends`).then((r) => setParams(r.parameters)).catch(() => setParams([]));
+  }, [id]);
+  useEffect(() => {
+    if (!code) return setPoints([]);
+    get<{ points: typeof points }>(`/api/patients/${id}/trends?parameter=${encodeURIComponent(code)}`).then((r) => setPoints(r.points)).catch(() => setPoints([]));
+  }, [id, code]);
+  if (params.length === 0) return null;
+  return (
+    <Panel title="Result trends">
+      <Field label="Parameter">
+        <select value={code} onChange={(e) => setCode(e.target.value)}>
+          <option value="">-</option>
+          {params.map((p) => <option key={p.code} value={p.code}>{p.name} ({p.n})</option>)}
+        </select>
+      </Field>
+      {code ? (
+        <Table
+          head={['Date', 'Value', 'Flag']}
+          rows={points.map((p) => [dateOnly(p.date), `${p.value} ${p.unit ?? ''}`, p.flag && p.flag !== 'N' ? <Badge key="f" tone="warn">{p.flag}</Badge> : 'N'])}
+          empty="No results"
+        />
+      ) : null}
+    </Panel>
   );
 }
 

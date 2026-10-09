@@ -361,7 +361,7 @@ function Ops({ s }: { s: Session }) {
             <dt>Version</dt><dd>{String(health.version)}</dd>
             <dt>Database size</dt><dd>{Math.round(Number(health.dbBytes) / 1024)} KB</dd>
             <dt>Last backup</dt><dd>{health.lastBackup ? when(String((health.lastBackup as { created_at: string }).created_at)) : 'none yet'}</dd>
-            <dt>Messages waiting</dt><dd>{JSON.stringify(health.outbox)}</dd>
+            <dt>Messages waiting</dt><dd>{(health.outbox as Array<{ status: string; n: number }>).length ? (health.outbox as Array<{ status: string; n: number }>).map((o) => `${o.n} ${o.status.replace('_', ' ')}`).join(', ') : 'none'}</dd>
           </dl>
         ) : <p className="muted">Health information unavailable</p>}
       </Panel>

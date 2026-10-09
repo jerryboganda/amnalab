@@ -243,7 +243,7 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         {item.patient.name} ({item.patient.mrn}) | {item.patient.gender} | Accession <code>{item.specimen.accession}</code> ({item.specimen.type}, {item.specimen.status}) | Order {item.orderNo}{' '}
         {item.priority !== 'routine' ? <Badge tone="danger">{item.priority.toUpperCase()}</Badge> : null}
       </p>
-      {!specimenReady ? <Notice kind="warn">Results can be entered only after the specimen is received in the lab.</Notice> : null}
+      {!specimenReady && !anyEntered ? <Notice kind="warn">Results can be entered only after the specimen is received in the lab.</Notice> : null}
       {act.error ? <Notice kind="error">{act.error}</Notice> : null}
       {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
 
@@ -330,9 +330,9 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         </table>
         </div>
 
-        {specimenReady && item.status !== 'completed' ? (
+        {item.status !== 'completed' ? (
           <div className="row-actions">
-            {s.can('results.enter') ? <button className="primary" onClick={() => void saveEntries()} disabled={act.busy}>Save results</button> : null}
+            {s.can('results.enter') && specimenReady ? <button className="primary" onClick={() => void saveEntries()} disabled={act.busy}>Save results</button> : null}
             {act.error ? <span className="text-warn" role="alert">{act.error}</span> : act.ok ? <span className="muted" role="status">{act.ok}</span> : null}
             {s.can('results.review') && draftsByOthers ? <button onClick={() => void review()} disabled={act.busy}>Technical review</button> : null}
           </div>

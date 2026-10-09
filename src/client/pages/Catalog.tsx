@@ -195,7 +195,8 @@ function TestView({ s, id }: { s: Session; id: number }) {
   const load = () => get<TestDetail>(`/api/catalog/tests/${id}`).then(setTest).catch((e: Error) => act.setError(e.message));
   useEffect(() => {
     void load();
-    get('/api/inventory/items').then((r: Array<{ id: number; code: string; name: string }>) => setItems(r)).catch(() => setItems([]));
+    // Only the reagent editor needs the item list, and it is for catalog editors.
+    if (s.can('catalog.write') && s.can('inventory.read')) get('/api/inventory/items').then((r: Array<{ id: number; code: string; name: string }>) => setItems(r)).catch(() => setItems([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

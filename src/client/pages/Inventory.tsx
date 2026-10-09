@@ -191,7 +191,9 @@ function Adjust({ s, items, onDone }: { s: Session; items: StockItem[]; onDone: 
   const qtyNum = Number(f.qty);
 
   async function submit() {
-    const body: Record<string, unknown> = { branchId: s.branchId, lotId: Number(lotId), qty: qtyNum, reason: f.reason, txnType: f.txnType };
+    // Wastage and returns always reduce stock, so the user types a plain amount.
+    const qty = f.txnType === 'adjustment' ? qtyNum : -Math.abs(qtyNum);
+    const body: Record<string, unknown> = { branchId: s.branchId, lotId: Number(lotId), qty, reason: f.reason, txnType: f.txnType };
     if (f.approverUser) body.approver = { username: f.approverUser, password: f.approverPass };
     const out = await act.run(() => post('/api/inventory/adjustments', body));
     if (out) {
@@ -217,7 +219,7 @@ function Adjust({ s, items, onDone }: { s: Session; items: StockItem[]; onDone: 
             <option value="return">Return to supplier</option>
           </select>
         </Field>
-        <Field label="Quantity change" hint="Use a minus sign to reduce stock"><input type="number" step="any" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></Field>
+        <Field label="Quantity change" hint={f.txnType === 'adjustment' ? 'Use a minus sign to reduce stock' : 'Enter the amount removed from stock'}><input type="number" step="any" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></Field>
         <Field label="Reason (required)"><input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
       </div>
       {Math.abs(qtyNum) > 0 ? (
