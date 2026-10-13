@@ -333,7 +333,6 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         {item.status !== 'completed' ? (
           <div className="row-actions">
             {s.can('results.enter') && specimenReady ? <button className="primary" onClick={() => void saveEntries()} disabled={act.busy}>Save results</button> : null}
-            {act.error ? <span className="text-warn" role="alert">{act.error}</span> : act.ok ? <span className="muted" role="status">{act.ok}</span> : null}
             {s.can('results.review') && draftsByOthers ? <button onClick={() => void review()} disabled={act.busy}>Technical review</button> : null}
           </div>
         ) : null}

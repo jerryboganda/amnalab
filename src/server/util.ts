@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { AuthUser } from './security.ts';
+import { invalid } from './http.ts';
 
 export const nowIso = (): string => new Date().toISOString();
 
@@ -49,11 +50,17 @@ export function ageInYears(dob: string, at: Date = new Date()): number {
 export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
 // Stored timestamps are UTC. A lab "day" (YYYY-MM-DD) runs from local midnight in Pakistan (UTC+5, no DST).
+// Business days follow Pakistan time (UTC+5). An impossible date such as 2026-13-45 is rejected, not a crash.
+function dayStartMs(date: string): number {
+  const ms = new Date(`${date}T00:00:00+05:00`).getTime();
+  if (Number.isNaN(ms)) throw invalid('Date must be a real date written YYYY-MM-DD');
+  return ms;
+}
 export function dayStartUtc(date: string): string {
-  return new Date(`${date}T00:00:00+05:00`).toISOString();
+  return new Date(dayStartMs(date)).toISOString();
 }
 export function dayEndUtc(date: string): string {
-  return new Date(new Date(`${date}T00:00:00+05:00`).getTime() + 86_400_000).toISOString();
+  return new Date(dayStartMs(date) + 86_400_000).toISOString();
 }
 
 export function isValidTimezone(tz: string): boolean {

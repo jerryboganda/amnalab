@@ -227,6 +227,12 @@ export function arr(body: Body, key: string, max = 200): unknown[] {
   return v;
 }
 
+// Every entry of a posted list must be a JSON object, so handlers can read fields without crashing on null or numbers.
+export function asObjects(list: unknown[], what: string): Array<Record<string, any>> {
+  if (list.some((x) => x === null || typeof x !== 'object' || Array.isArray(x))) throw invalid(`Every entry in ${what} must be an object`);
+  return list as Array<Record<string, any>>;
+}
+
 export function intParam(value: string, name: string): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n <= 0) throw badRequest(`${name} must be a positive integer`);

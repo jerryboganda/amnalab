@@ -111,3 +111,15 @@ test('range bar geometry: band inside the scale, out-of-scale values clamp to th
   assert.equal(rangeGeometry(150, null, 200, 100)!.bandStart, 0);
   assert.equal(rangeGeometry(10, null, null, 100), null);
 });
+
+test('impossible dates are rejected cleanly and list entries must be objects', async () => {
+  const { dayStartUtc, dayEndUtc } = await import('../../src/server/util.ts');
+  const { asObjects } = await import('../../src/server/http.ts');
+  assert.equal(dayStartUtc('2026-10-13'), '2026-10-12T19:00:00.000Z');
+  assert.equal(dayEndUtc('2026-10-13'), '2026-10-13T19:00:00.000Z');
+  assert.throws(() => dayStartUtc('2026-13-45'), /real date/);
+  assert.throws(() => dayEndUtc('9999-99-99'), /real date/);
+  assert.equal(asObjects([{ a: 1 }], 'values').length, 1);
+  assert.throws(() => asObjects([null], 'values'), /must be an object/);
+  assert.throws(() => asObjects([5], 'values'), /must be an object/);
+});

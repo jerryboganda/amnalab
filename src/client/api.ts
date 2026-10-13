@@ -15,17 +15,27 @@ type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export const SESSION_EXPIRED = 'lms:session-expired';
 
 export async function api<T = any>(method: Method, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: {
-      'X-Requested-With': 'lms',
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        'X-Requested-With': 'lms',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, 'offline', 'Cannot reach the Amna Lab LMS server on this PC. Start it from the desktop shortcut, then try again.');
+  }
   const text = await res.text();
-  const data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  let data: Record<string, unknown> = {};
+  try {
+    data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    throw new ApiError(res.status, 'bad_response', 'The server sent an unexpected reply. Reload the page and try again.');
+  }
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/login')) {
       window.dispatchEvent(new Event(SESSION_EXPIRED));

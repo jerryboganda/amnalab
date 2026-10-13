@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { get, pkr, post, when } from '../api.ts';
-import { Badge, Field, Notice, Panel, Table, useAction } from '../ui.tsx';
+import { Badge, Field, Notice, Panel, Table, useAction, useAsk } from '../ui.tsx';
 import type { Session } from '../App.tsx';
 
 interface InvoiceRow {
@@ -243,6 +243,7 @@ interface ClosingData {
 }
 
 function DailyClosing({ s }: { s: Session }) {
+  const { ask, node } = useAsk();
   const [date, setDate] = useState(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi' }).format(new Date()));
   const [data, setData] = useState<ClosingData | null>(null);
   const [counted, setCounted] = useState('');
@@ -254,7 +255,7 @@ function DailyClosing({ s }: { s: Session }) {
   }, [s.branchId, date]);
 
   async function reopen() {
-    const reason = window.prompt('Reason for reopening this day (5+ characters)');
+    const reason = await ask({ title: 'Reopen day', label: 'Reason for reopening this day', hint: 'At least 5 characters. It is kept in the audit log.', minLength: 5, submit: 'Reopen day' });
     if (!reason) return;
     await act.run(() => post('/api/billing/closing/reopen', { branchId: s.branchId, date, reason }), 'Day reopened');
     await load();
@@ -268,6 +269,7 @@ function DailyClosing({ s }: { s: Session }) {
   if (!data) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading...</p>;
   return (
     <Panel title="End-of-day cash reconciliation">
+      {node}
       <div className="toolbar-right">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Business date" />
       </div>

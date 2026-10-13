@@ -9,6 +9,7 @@ interface DashData {
   messaging: { outboxFailed: number; outboxWaiting: number };
   finance: { collectedTodayPkr: number; byMethodPkr: Record<string, number>; unpaidInvoices: number; unpaidDuePkr: number };
   inventory: { lowStockItems: number };
+  backup: { configured: boolean; lastAt: string | null; stale: boolean } | null;
 }
 
 const LABELS: Record<string, string> = {
@@ -42,6 +43,11 @@ export function Dashboard({ s }: { s: Session }) {
   return (
     <>
       <h1>Dashboard <span className="muted small">business day {data.businessDate}</span></h1>
+      {data.backup && !data.backup.configured ? (
+        <Notice kind="error">Backups are not set up. Add a backup passphrase to data/config.json, or the lab data is not protected.</Notice>
+      ) : data.backup?.stale ? (
+        <Notice kind="warn">No backup in the last 36 hours. Open Admin, Backup and health, then press Back up now.</Notice>
+      ) : null}
       <div className="stats">
         {Object.entries(LABELS).map(([key, label]) => (
           <Stat

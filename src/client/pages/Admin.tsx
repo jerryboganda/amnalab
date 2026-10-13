@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fileToDataUrl, get, patch, post, put, when } from '../api.ts';
-import { Badge, Field, Notice, Panel, Table, useAction } from '../ui.tsx';
+import { Badge, Field, Notice, Panel, Table, useAction, useAsk } from '../ui.tsx';
 import type { Session } from '../App.tsx';
 
 type Section = 'users' | 'branches' | 'template' | 'settings' | 'audit' | 'ops';
@@ -62,6 +62,7 @@ interface UserRow {
 }
 
 function Users({ s }: { s: Session }) {
+  const { ask, node } = useAsk();
   const [rows, setRows] = useState<UserRow[]>([]);
   const [branches, setBranches] = useState<Array<{ id: number; name: string; code: string }>>([]);
   const [f, setF] = useState({ username: '', fullName: '', role: 'reception', password: '', branchIds: [] as number[] });
@@ -85,13 +86,13 @@ function Users({ s }: { s: Session }) {
   }
 
   async function reset(u: UserRow) {
-    const pw = window.prompt(`New temporary password for ${u.username} (10+ characters, letters and digits)`);
+    const pw = await ask({ title: 'Reset password', label: `New temporary password for ${u.username}`, hint: '10+ characters, with letters and digits. The user is signed out.', secret: true, minLength: 10, submit: 'Reset password' });
     if (!pw) return;
     await act.run(() => patch(`/api/admin/users/${u.id}`, { password: pw }), 'Password reset. The user is signed out.');
   }
 
   async function credentials(u: UserRow) {
-    const q = window.prompt(`Qualifications printed under ${u.fullName}'s name on reports (e.g. MBBS, M.Phil Pathology (UHS))`, u.qualifications ?? '');
+    const q = await ask({ title: 'Qualifications', label: `Printed under ${u.fullName}'s name on reports`, hint: 'For example: MBBS, M.Phil Pathology (UHS)', initial: u.qualifications ?? '', optional: true, submit: 'Save' });
     if (q === null) return;
     await act.run(() => patch(`/api/admin/users/${u.id}`, { qualifications: q.trim() || null }), 'Qualifications saved');
     await load();
@@ -114,6 +115,7 @@ function Users({ s }: { s: Session }) {
 
   return (
     <>
+      {node}
       <Panel title="Add a user">
         <div className="form-grid">
           <Field label="Username"><input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></Field>
@@ -477,7 +479,17 @@ function Ops({ s }: { s: Session }) {
         {health ? (
           <dl className="kv">
             <dt>Version</dt><dd>{String(health.version)}</dd>
-            <dt>Database size</dt><dd>{Math.round(Number(health.dbBytes) / 1024)} KB</dd>
+            <dt>Database size</dt><dd>{(Number(health.dbBytes) / 1048576).toFixed(1)} MB</dd>
+            <dt>Database check</dt>
+            <dd className={health.dbCheck === 'ok' ? undefined : 'text-warn'}>{health.dbCheck === 'ok' ? 'ok' : `PROBLEM: ${String(health.dbCheck)}. Restore the latest backup.`}</dd>
+            <dt>Free disk space</dt>
+            <dd className={health.diskFreeBytes != null && Number(health.diskFreeBytes) < 1073741824 ? 'text-warn' : undefined}>
+              {health.diskFreeBytes != null ? `${(Number(health.diskFreeBytes) / 1073741824).toFixed(1)} GB` : 'unknown'}
+            </dd>
+            <dt>Automatic backup</dt>
+            <dd className={(health.backup as { configured: boolean }).configured ? undefined : 'text-warn'}>
+              {(health.backup as { configured: boolean }).configured ? 'set up' : 'NOT set up: add backup.passphrase to data/config.json'}
+            </dd>
             <dt>Last backup</dt><dd>{health.lastBackup ? when(String((health.lastBackup as { created_at: string }).created_at)) : 'none yet'}</dd>
             <dt>Messages waiting</dt><dd>{(health.outbox as Array<{ status: string; n: number }>).length ? (health.outbox as Array<{ status: string; n: number }>).map((o) => `${o.n} ${o.status.replace('_', ' ')}`).join(', ') : 'none'}</dd>
           </dl>

@@ -140,24 +140,42 @@ export function createBackup(db: DatabaseSync, kind: 'auto' | 'manual', actor: A
   return { id: row.id, file, size: encrypted.length, sha256, createdAt: row.created_at };
 }
 
+// Used by the dashboard and the health page so a missing passphrase or a stopped schedule is never silent.
+export function backupStatus(db: DatabaseSync): { configured: boolean; lastAt: string | null; stale: boolean } {
+  const pass = loadFileConfig().backup?.passphrase;
+  const configured = typeof pass === 'string' && pass.length >= 12;
+  const last = db.prepare('SELECT created_at FROM backups ORDER BY id DESC LIMIT 1').get() as { created_at: string } | undefined;
+  const lastAt = last?.created_at ?? null;
+  // Stale = nothing in the last 36 hours. A PC that is off overnight still backs up the next day.
+  const stale = !lastAt || Date.now() - Date.parse(lastAt) > 36 * 3_600_000;
+  return { configured, lastAt, stale };
+}
+
 export function listBackups(db: DatabaseSync) {
   return db.prepare('SELECT id, file, size, sha256, kind, created_at FROM backups ORDER BY id DESC LIMIT 100').all();
 }
 
-// Runs once a day at the configured hour, if no automatic backup exists for today.
+// Runs once a day: at the first check after the configured hour (default 02:00) with no automatic backup
+// yet for today. The lab PC is often switched off overnight, so it catches up when the PC is next on.
+// A failed attempt is retried at most every 30 minutes so a missing passphrase does not spam the log.
+let lastAutoFailure = 0;
 export function maybeAutoBackup(db: DatabaseSync): void {
-  const hour = loadFileConfig().backup?.hour ?? 2;
-  const now = new Date();
-  if (now.getHours() !== hour) return;
-  const today = now.toISOString().slice(0, 10);
-  const done = db
-    .prepare("SELECT id FROM backups WHERE kind = 'auto' AND substr(created_at, 1, 10) = ? LIMIT 1")
-    .get(today);
-  if (done) return;
   try {
-    createBackup(db, 'auto', null);
+    const hour = loadFileConfig().backup?.hour ?? 2;
+    const now = new Date();
+    const due = new Date(now);
+    due.setHours(hour, 0, 0, 0);
+    if (now < due || Date.now() - lastAutoFailure < 30 * 60_000) return;
+    const done = db.prepare("SELECT id FROM backups WHERE kind = 'auto' AND created_at >= ? LIMIT 1").get(due.toISOString());
+    if (done) return;
+    try {
+      createBackup(db, 'auto', null);
+    } catch (err) {
+      lastAutoFailure = Date.now();
+      console.error('Automatic backup failed:', (err as Error).message);
+    }
   } catch (err) {
-    console.error('Automatic backup failed:', (err as Error).message);
+    console.error('Backup scheduler error:', (err as Error).message);
   }
 }
 

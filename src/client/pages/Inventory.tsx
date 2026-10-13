@@ -48,14 +48,21 @@ export function Inventory({ s }: { s: Session }) {
     void loadStock();
   };
 
+  // A success message is shown briefly; it must not linger beside a later error.
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => setMessage(null), 5000);
+    return () => clearTimeout(t);
+  }, [message]);
+
   return (
     <>
       <div className="toolbar">
         <h1>Inventory</h1>
       </div>
       <nav className="tabs" aria-label="Inventory sections">
-        {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => setTab(t.id)}>
+        {TABS.filter((t) => s.can('inventory.write') || !['receive', 'issue', 'adjust', 'transfer'].includes(t.id)).map((t) => (
+          <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => { setMessage(null); setTab(t.id); }}>
             {t.label}
           </button>
         ))}

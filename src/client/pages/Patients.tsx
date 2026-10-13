@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, dateOnly, get, patch, post } from '../api.ts';
-import { Badge, Field, Notice, Panel, Table, useAction } from '../ui.tsx';
+import { Badge, Field, Notice, Panel, Table, useAction, useAsk } from '../ui.tsx';
 import type { Session } from '../App.tsx';
 
 interface PatientRow {
@@ -187,16 +187,20 @@ function RegisterForm({ s, onCreated }: { s: Session; onCreated: (id: number) =>
   async function submit(e: FormEvent, force = false) {
     e.preventDefault();
     setDuplicates(null);
-    try {
-      const created = await post<{ id: number }>('/api/patients', body(force));
-      onCreated(created.id);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409 && Array.isArray((err.data as { duplicates?: unknown }).duplicates)) {
-        setDuplicates((err.data as { duplicates: Array<{ id: number; mrn: string; fullName: string; phone: string | null }> }).duplicates);
-        return;
-      }
-      act.setError((err as Error).message);
-    }
+    act.setError(null);
+    const created = await act
+      .run(async () => {
+        try {
+          return await post<{ id: number }>('/api/patients', body(force));
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 409 && Array.isArray((err.data as { duplicates?: unknown }).duplicates)) {
+            setDuplicates((err.data as { duplicates: Array<{ id: number; mrn: string; fullName: string; phone: string | null }> }).duplicates);
+            return undefined;
+          }
+          throw err;
+        }
+      });
+    if (created) onCreated(created.id);
   }
 
   return (
@@ -243,7 +247,7 @@ function RegisterForm({ s, onCreated }: { s: Session; onCreated: (id: number) =>
         ) : null}
         {act.error ? <div className="span-all"><Notice kind="error">{act.error}</Notice></div> : null}
         <div className="span-all">
-          <button type="submit" className="primary">Save patient</button>
+          <button type="submit" className="primary" disabled={act.busy}>{act.busy ? 'Saving...' : 'Save patient'}</button>
         </div>
       </form>
     </Panel>
@@ -391,10 +395,11 @@ function DoctorPicker({
   practitioners: Practitioner[];
   setPractitioners: (p: Practitioner[]) => void;
 }) {
+  const { ask, node } = useAsk();
   const [error, setError] = useState<string | null>(null);
   async function add() {
-    const name = window.prompt('Referring doctor name (e.g. Dr. Sana Iqbal)');
-    if (!name || name.trim().length < 2) return;
+    const name = await ask({ title: 'Add referring doctor', label: 'Doctor name', hint: 'For example: Dr. Sana Iqbal', minLength: 2, submit: 'Add doctor' });
+    if (!name) return;
     try {
       const created = await post<{ id: number; name: string }>('/api/practitioners', { name: name.trim() });
       setPractitioners([...practitioners, created].sort((a, b) => a.name.localeCompare(b.name)));
@@ -406,6 +411,7 @@ function DoctorPicker({
   }
   return (
     <Field label="Referring doctor" hint={error ?? undefined}>
+      {node}
       <div className="row-actions">
         <select value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">Self / none</option>

@@ -11,3 +11,8 @@ $lnk.Description = 'Start Amna Lab LMS'
 $lnk.IconLocation = "$env:SystemRoot\System32\shell32.dll,13"
 $lnk.Save()
 Write-Host "Desktop shortcut created: $lnkPath"
+
+# Start with Windows: a copy in the user's Startup folder (delete it to turn this off).
+$startup = [Environment]::GetFolderPath('Startup')
+Copy-Item -Force $lnkPath (Join-Path $startup 'Amna Lab LMS.lnk')
+Write-Host "Startup shortcut created in: $startup"

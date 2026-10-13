@@ -40,7 +40,18 @@ export interface FileConfig {
   publicBaseUrl?: string;
 }
 
+// A typo in data/config.json must never take the server down: report it once and run with defaults.
+let warnedBadConfig = false;
 export function loadFileConfig(): FileConfig {
   if (!existsSync(config.configFile)) return {};
-  return JSON.parse(readFileSync(config.configFile, 'utf8')) as FileConfig;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(config.configFile, 'utf8'));
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as FileConfig) : {};
+  } catch (err) {
+    if (!warnedBadConfig) {
+      warnedBadConfig = true;
+      console.error('data/config.json is not valid JSON and is being ignored:', (err as Error).message);
+    }
+    return {};
+  }
 }

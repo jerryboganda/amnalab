@@ -29,12 +29,23 @@ if (-not (Test-Path (Join-Path $root 'dist\server\index.js'))) {
   exit 1
 }
 
-$proc = $null
-if (-not (Test-Up)) {
-  $dataDir = Join-Path $root 'data'
+$script:proc = $null
+$script:stopping = $false
+$dataDir = Join-Path $root 'data'
+
+function Start-Server {
   New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-  $proc = Start-Process -FilePath $node -ArgumentList 'dist/server/index.js' -WorkingDirectory $root -WindowStyle Hidden -PassThru `
+  # Keep the previous run's log so a crash can be diagnosed after the automatic restart.
+  foreach ($n in 'server.log', 'server.err.log') {
+    $p = Join-Path $dataDir $n
+    if (Test-Path $p) { Move-Item -Force $p ($p -replace '.log$', '.prev.log') }
+  }
+  $script:proc = Start-Process -FilePath $node -ArgumentList 'dist/server/index.js' -WorkingDirectory $root -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $dataDir 'server.log') -RedirectStandardError (Join-Path $dataDir 'server.err.log')
+}
+
+if (-not (Test-Up)) {
+  Start-Server
   for ($i = 0; $i -lt 40 -and -not (Test-Up); $i++) { Start-Sleep -Milliseconds 250 }
 }
 
@@ -50,11 +61,27 @@ $openItem = $menu.Items.Add('Open LMS')
 $openItem.add_Click({ Start-Process $url })
 $stopItem = $menu.Items.Add('Stop LMS and exit')
 $stopItem.add_Click({
-  if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+  $script:stopping = $true
+  if ($script:proc -and -not $script:proc.HasExited) {
+    Stop-Process -Id $script:proc.Id -Force
+  } else {
+    # The server was started by an earlier launcher: stop it by its command line.
+    Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
+      Where-Object { $_.CommandLine -like '*dist*server*index.js*' } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  }
   $icon.Visible = $false
   [System.Windows.Forms.Application]::Exit()
 })
 $icon.ContextMenuStrip = $menu
 $icon.add_DoubleClick({ Start-Process $url })
+
+# Watchdog: if the server process dies (crash, killed by antivirus), bring it back within 15 seconds.
+$watch = New-Object System.Windows.Forms.Timer
+$watch.Interval = 15000
+$watch.add_Tick({
+  if (-not $script:stopping -and $script:proc -and $script:proc.HasExited) { Start-Server }
+})
+$watch.Start()
 
 [System.Windows.Forms.Application]::Run()

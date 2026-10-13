@@ -27,7 +27,9 @@ Create `data/config.json` (git-ignored) with the integrations you have. Every se
 - **Gmail:** create an OAuth client in Google Cloud for the owner's account, then store the refresh token above. Testing-mode tokens expire every 7 days, so sign in again when email stops.
 - **SMS:** set the gateway chosen with the client. Until then SMS messages wait in the queue.
 
-Start the app with the desktop shortcut: run `powershell -ExecutionPolicy Bypass -File scripts\install-shortcut.ps1` once. Or run `npm start` in a terminal.
+Start the app with the desktop shortcut: run `powershell -ExecutionPolicy Bypass -File scripts\install-shortcut.ps1` once. It puts a shortcut on the desktop and one in the Startup folder, so the LMS starts when the user signs in to Windows (delete the Startup copy to turn that off). The launcher keeps a tray icon (Open / Stop) and restarts the server within 15 seconds if it ever stops. The previous run's log is kept as `data/server.prev.log`. Or run `npm start` in a terminal.
+
+**Offline:** after `npm install` and `npm run build` the app needs no internet. Only Gmail and the SMS gateway use the network, and only when configured.
 
 ## First run
 
@@ -48,7 +50,9 @@ Open the app. The first-time setup asks for the laboratory name, the first branc
 ## Data and safety
 
 - All data is in `data/lms.db` (SQLite, WAL). Reports are in `data/files/reports`. Nothing leaves the PC except the messages you send (Gmail, SMS gateway, WhatsApp via your own browser).
-- Backups are AES-256-GCM encrypted to `backups/`. A backup runs each night and on demand under **Admin → Backup & health**.
+- Backups are AES-256-GCM encrypted to `backups/` and hold the database, issued reports, attachments and branding images. A backup runs each day after 02:00 (or at the first check after the PC is switched on, if it was off) and on demand under **Admin → Backup & health**. Without `backup.passphrase` in `data/config.json` no backup is made; the dashboard and the health page say so.
+- Copy the `backups/` folder to a second drive or USB stick regularly. A backup on the same disk does not protect against a failed disk.
+- The database uses full-durability writes, so a power cut loses at most the request in progress. **Admin → Backup & health** shows a database check and the free disk space.
 - The audit log, payments, result revisions and stock ledger are append-only at the database level.
 - Results follow four-eyes rules: whoever enters a result cannot review or authorize it. Discounts, refunds, voids and large stock adjustments need a second person's password.
 

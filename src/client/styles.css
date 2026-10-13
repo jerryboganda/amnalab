@@ -194,3 +194,9 @@ input[type='file'] { padding: 0.3rem; }
   .content { padding: 0; }
   .panel { border: none; }
 }
+
+.dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: inherit; padding: 1.25rem 1.5rem; width: min(420px, calc(100vw - 2rem)); }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+.dialog .row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+.dialog .field { margin-top: 0.7rem; }

@@ -1,4 +1,5 @@
-import { existsSync, statSync } from 'node:fs';
+import { statfsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Router } from '../http.ts';
 import { RawResponse, arr, badRequest, bool, conflict, forbidden, int, intParam, json, notFound, oneOf, optStr, str } from '../http.ts';
@@ -11,7 +12,7 @@ import { sampleInvoice, sampleReport } from '../services/sample-docs.ts';
 import { renderReportPdf } from '../services/report-pdf.tsx';
 import { renderInvoicePdf } from '../services/invoice-pdf.tsx';
 import { toCsv } from '../services/csv.ts';
-import { createBackup, listBackups } from '../services/backup.ts';
+import { backupStatus, createBackup, listBackups } from '../services/backup.ts';
 import { config } from '../config.ts';
 import { dayEndUtc, dayStartUtc, isValidTimezone, nowIso } from '../util.ts';
 
@@ -218,8 +219,13 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
       }
     }
     if (b.isActive !== undefined) {
+      const active = bool(b, 'isActive');
+      if (!active) {
+        const others = db.prepare('SELECT COUNT(*) AS n FROM branches WHERE is_active = 1 AND id <> ?').get(id) as { n: number };
+        if (others.n === 0) throw conflict('At least one branch must stay active. Add or activate another branch first.');
+      }
       sets.push('is_active = ?');
-      vals.push(bool(b, 'isActive') ? 1 : 0);
+      vals.push(active ? 1 : 0);
     }
     if (sets.length) {
       db.prepare(`UPDATE branches SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
@@ -397,6 +403,7 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     const b = ctx.body;
     if (b.discount_caps !== undefined) {
       const caps = b.discount_caps as Record<string, any>;
+      if (caps === null || typeof caps !== 'object' || Array.isArray(caps)) throw badRequest('discount_caps must be an object of role -> percent');
       for (const [role, pct] of Object.entries(caps)) {
         if (!(ROLES as readonly string[]).includes(role)) throw badRequest(`Unknown role: ${role}`);
         if (typeof pct !== 'number' || pct < 0 || pct > 100) throw badRequest(`Discount cap for ${role} must be 0-100`);
@@ -415,12 +422,24 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
   r.get('/api/ops/health', (ctx) => {
     const user = ctx.user!;
     if (!user.perms.has('ops.backup') && !user.perms.has('admin.audit')) throw forbidden('ops.backup');
-    const dbSize = existsSync(config.dbFile) ? statSync(config.dbFile).size : 0;
+    // Size from SQLite itself: in WAL mode the main file alone understates what is stored.
+    const pages = (db.prepare('PRAGMA page_count').get() as { page_count: number }).page_count;
+    const pageSize = (db.prepare('PRAGMA page_size').get() as { page_size: number }).page_size;
+    const dbSize = pages * pageSize;
+    let diskFreeBytes: number | null = null;
+    try {
+      const fs = statfsSync(dirname(config.dbFile));
+      diskFreeBytes = Number(fs.bavail) * Number(fs.bsize);
+    } catch {
+      /* not available on this platform */
+    }
     const outbox = db
       .prepare(`SELECT status, COUNT(*) AS n FROM outbox WHERE status IN ('queued','retrying','failed','awaiting_staff') GROUP BY status`)
       .all();
     const lastBackup = db.prepare('SELECT file, size, created_at FROM backups ORDER BY id DESC LIMIT 1').get() ?? null;
-    return { status: 'ok', version: config.version, dbBytes: dbSize, outbox, lastBackup, now: nowIso() };
+    // A power cut can leave a damaged file; this check is quick for a lab-sized database.
+    const check = (db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check;
+    return { status: 'ok', version: config.version, dbBytes: dbSize, dbCheck: check, diskFreeBytes, outbox, lastBackup, backup: backupStatus(db), now: nowIso() };
   });
 
   r.post('/api/ops/backup', (ctx) => {

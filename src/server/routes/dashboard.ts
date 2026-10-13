@@ -3,6 +3,7 @@ import type { Router } from '../http.ts';
 import { intQuery, badRequest } from '../http.ts';
 import { assertBranch, requirePerm, visibleBranches } from '../security.ts';
 import { fromPaisa, businessDate } from '../util.ts';
+import { backupStatus } from '../services/backup.ts';
 
 // Lab day starts at local midnight in Asia/Karachi (UTC+5, no daylight saving).
 const dayStartIso = (date: string) => new Date(`${date}T00:00:00+05:00`).toISOString();
@@ -112,6 +113,8 @@ export function registerDashboard(r: Router, db: DatabaseSync) {
         unpaidDuePkr: fromPaisa(unpaid.due),
       },
       inventory: { lowStockItems: lowStock },
+      // Only people who can manage backups are told when backups are not running.
+      backup: user.perms.has('ops.backup') ? backupStatus(db) : null,
     };
   });
 }

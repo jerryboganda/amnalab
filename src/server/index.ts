@@ -192,6 +192,32 @@ setInterval(() => {
   );
 }, 60_000).unref();
 
+server.on('error', (err: NodeJS.ErrnoException) => {
+  console.error(
+    err.code === 'EADDRINUSE'
+      ? `Port ${config.port} is already in use. Close the other program or the other copy of Amna Lab LMS, then start again.`
+      : `Server error: ${err.message}`,
+  );
+  process.exit(1);
+});
+
+// Keep serving after an unexpected error in one request or timer; the details go to the log.
+process.on('uncaughtException', (err) => console.error('Unexpected error:', err));
+process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err));
+
+// Close cleanly on Stop / Ctrl+C so SQLite folds its write-ahead log back into lms.db.
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
+  process.on(sig, () => {
+    server.close();
+    try {
+      db.close();
+    } catch {
+      /* already closed */
+    }
+    process.exit(0);
+  });
+}
+
 server.listen(config.port, config.host, () => {
   console.log(`Amna Lab LMS ${config.version} running at http://${config.host}:${config.port}`);
 });

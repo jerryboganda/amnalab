@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Router } from '../http.ts';
-import { RawResponse, arr, conflict, forbidden, intParam, json, notFound, num, str } from '../http.ts';
+import { RawResponse, arr, asObjects, conflict, forbidden, intParam, json, notFound, num, str } from '../http.ts';
 import { audit } from '../audit.ts';
 import { requirePerm, type AuthUser } from '../security.ts';
 import { nowIso } from '../util.ts';
@@ -80,7 +80,7 @@ export function registerResults(r: Router, db: DatabaseSync) {
     const user = ctx.user!;
     requirePerm(user, 'results.enter');
     const itemId = intParam(ctx.params.id!, 'id');
-    const values = arr(ctx.body, 'values', 200) as Array<Record<string, any>>;
+    const values = asObjects(arr(ctx.body, 'values', 200), 'values');
     const entries: Entry[] = values.map((v) => ({
       parameterId: Number(v.parameterId),
       valueNumeric: v.valueNumeric === undefined || v.valueNumeric === null || v.valueNumeric === '' ? null : Number(v.valueNumeric),

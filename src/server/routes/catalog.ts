@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Router } from '../http.ts';
-import { RawResponse, badRequest, bool, conflict, int, intParam, invalid, json, notFound, num, oneOf, optStr, str } from '../http.ts';
+import { RawResponse, asObjects, badRequest, bool, conflict, int, intParam, invalid, json, notFound, num, oneOf, optStr, str } from '../http.ts';
 import { audit } from '../audit.ts';
 import { requirePerm, type AuthUser } from '../security.ts';
 import { toPaisa, fromPaisa, businessDate } from '../util.ts';
@@ -383,7 +383,7 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
     requirePerm(actor, 'catalog.write');
     const testId = intParam(ctx.params.id!, 'id');
     if (!db.prepare('SELECT id FROM tests WHERE id = ?').get(testId)) throw notFound('Test not found');
-    const items = (Array.isArray(ctx.body.items) ? ctx.body.items : []) as Array<{ itemId: unknown; qtyPerTest: unknown }>;
+    const items = asObjects(Array.isArray(ctx.body.items) ? ctx.body.items : [], 'items');
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare('DELETE FROM test_reagents WHERE test_id = ?').run(testId);

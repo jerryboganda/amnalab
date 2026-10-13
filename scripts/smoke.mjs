@@ -295,6 +295,17 @@ try {
   }
   passed++;
 
+  step('hardening: hostile input is refused with 4xx, never a crash');
+  assert.equal((await admin('PUT', '/api/admin/settings', { discount_caps: null })).status, 400);
+  assert.equal((await admin('GET', '/api/admin/audit?from=2026-13-45')).status, 422);
+  assert.equal((await tech('POST', '/api/order-items/1/results', { values: [null] })).status, 422);
+  assert.equal((await admin('PUT', '/api/catalog/tests/1/reagents', { items: [null] })).status, 422);
+  assert.equal((await admin('PATCH', `/api/admin/branches/${branchId}`, { isActive: false })).status, 409, 'the last active branch cannot be deactivated');
+  const health = (await admin('GET', '/api/ops/health')).json;
+  assert.equal(health.dbCheck, 'ok');
+  assert.equal(health.backup.configured, false);
+  passed++;
+
   console.log(`\nSmoke test passed: ${passed} checkpoints.`);
 } catch (err) {
   console.error('\nSmoke test FAILED:', err.message);

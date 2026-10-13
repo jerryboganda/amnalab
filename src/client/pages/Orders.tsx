@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { get, pkr, post, when } from '../api.ts';
-import { Badge, Field, Notice, Panel, Table, useAction } from '../ui.tsx';
+import { Badge, Field, Notice, Panel, Table, useAction, useAsk } from '../ui.tsx';
 import type { Session } from '../App.tsx';
 import { startWhatsApp } from './Patients.tsx';
 
@@ -92,7 +92,7 @@ interface TestOption {
 
 function NewOrder({ s, onCreated }: { s: Session; onCreated: (id: number) => void }) {
   const [patientQuery, setPatientQuery] = useState('');
-  const [patients, setPatients] = useState<Array<{ id: number; mrn: string; fullName: string; ageYears: number | null; gender: string }>>([]);
+  const [patients, setPatients] = useState<Array<{ id: number; mrn: string; fullName: string; ageYears: number | null; gender: string }> | null>(null);
   const [patient, setPatient] = useState<{ id: number; mrn: string; fullName: string } | null>(null);
   const [tests, setTests] = useState<TestOption[]>([]);
   const [picked, setPicked] = useState<number[]>([]);
@@ -110,8 +110,19 @@ function NewOrder({ s, onCreated }: { s: Session; onCreated: (id: number) => voi
   }, []);
 
   async function searchPatients() {
-    setPatients(await get(`/api/patients?q=${encodeURIComponent(patientQuery)}`));
+    try {
+      setPatients(await get(`/api/patients?q=${encodeURIComponent(patientQuery)}`));
+    } catch (e) {
+      act.setError((e as Error).message);
+    }
   }
+
+  // Enter inside a search box searches; it must not submit the whole order form.
+  const onEnter = (fn?: () => void) => (e: { key: string; preventDefault: () => void }) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    fn?.();
+  };
 
   const filtered = useMemo(
     () => tests.filter((t) => !testFilter || `${t.name} ${t.code} ${t.departmentName}`.toLowerCase().includes(testFilter.toLowerCase())),
@@ -159,11 +170,12 @@ function NewOrder({ s, onCreated }: { s: Session; onCreated: (id: number) => voi
             ) : (
               <>
                 <div className="toolbar-right">
-                  <input placeholder="Name, MRN or phone" value={patientQuery} onChange={(e) => setPatientQuery(e.target.value)} />
+                  <input placeholder="Name, MRN or phone" value={patientQuery} onChange={(e) => setPatientQuery(e.target.value)} onKeyDown={onEnter(() => void searchPatients())} autoFocus />
                   <button type="button" onClick={() => void searchPatients()}>Find</button>
                 </div>
+                {patients && patients.length === 0 ? <p className="muted small">No patient matches that search.</p> : null}
                 <ul className="plain">
-                  {patients.map((p) => (
+                  {(patients ?? []).map((p) => (
                     <li key={p.id}>
                       <button type="button" className="link" onClick={() => setPatient({ id: p.id, mrn: p.mrn, fullName: p.fullName })}>
                         {p.fullName}
@@ -196,7 +208,7 @@ function NewOrder({ s, onCreated }: { s: Session; onCreated: (id: number) => voi
         </div>
 
         <h3>2. Tests and panels</h3>
-        <input placeholder="Filter tests" value={testFilter} onChange={(e) => setTestFilter(e.target.value)} aria-label="Filter tests" />
+        <input placeholder="Filter tests" value={testFilter} onChange={(e) => setTestFilter(e.target.value)} onKeyDown={onEnter()} aria-label="Filter tests" />
         <div className="test-grid">
           {filtered.map((t) => (
             <label key={t.id} className={`test-chip ${picked.includes(t.id) ? 'on' : ''}`}>
@@ -274,6 +286,7 @@ interface OrderDetailData {
 }
 
 function OrderDetail({ s, id }: { s: Session; id: number }) {
+  const { ask, node } = useAsk();
   const [order, setOrder] = useState<OrderDetailData | null>(null);
   const [pendingReject, setPendingReject] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -295,14 +308,14 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
   }
 
   async function cancelItem(itemId: number, name: string) {
-    const reason = window.prompt(`Reason for cancelling ${name} (required). Refund any payment from Billing.`);
-    if (!reason || reason.trim().length < 5) return;
+    const reason = await ask({ title: 'Cancel test', label: `Reason for cancelling ${name}`, hint: 'At least 5 characters. Refund any payment from Billing.', minLength: 5, submit: 'Cancel test' });
+    if (!reason) return;
     await act.run(() => post(`/api/order-items/${itemId}/cancel`, { reason }), `${name} cancelled`);
     await load();
   }
 
   async function reissue() {
-    const reason = window.prompt('Reason for re-issuing this report (required)');
+    const reason = await ask({ title: 'Re-issue report', label: 'Reason for re-issuing this report', hint: 'At least 5 characters. A new version is issued and the old one stays on record.', minLength: 5, submit: 'Re-issue' });
     if (!reason) return;
     await act.run(() => post(`/api/orders/${id}/reissue`, { reason }), 'New report version issued');
     await load();
@@ -324,6 +337,7 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
 
   return (
     <>
+      {node}
       <div className="toolbar">
         <a href="#/orders">&larr; Orders</a>
         <h1>{order.order_no}</h1>
@@ -354,11 +368,11 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
                 <>
                   <input
                     placeholder="Collector name"
-                    value={collector[sp.id] ?? ''}
+                    value={collector[sp.id] ?? s.me.fullName}
                     onChange={(e) => setCollector({ ...collector, [sp.id]: e.target.value })}
                     aria-label="Collector name"
                   />
-                  <button disabled={!collector[sp.id] || act.busy} onClick={() => void specimenAction(sp.id, 'collect', { collectorName: collector[sp.id] }, 'Collected')}>Mark collected</button>
+                  <button disabled={!(collector[sp.id] ?? s.me.fullName).trim() || act.busy} onClick={() => void specimenAction(sp.id, 'collect', { collectorName: (collector[sp.id] ?? s.me.fullName).trim() }, 'Collected')}>Mark collected</button>
                 </>
               ) : null}
               {sp.status === 'collected' && s.can('specimens.write') ? <button onClick={() => void specimenAction(sp.id, 'receive', {}, 'Received in the lab')}>Receive</button> : null}

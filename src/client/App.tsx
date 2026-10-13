@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { get, post, SESSION_EXPIRED } from './api.ts';
 import { Login, Setup } from './pages/Auth.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
@@ -11,6 +11,7 @@ import { Catalog } from './pages/Catalog.tsx';
 import { Notifications } from './pages/Notifications.tsx';
 import { Admin } from './pages/Admin.tsx';
 import { Verify } from './pages/Verify.tsx';
+import { Field, Notice, useAction } from './ui.tsx';
 
 export interface Me {
   id: number;
@@ -48,11 +49,47 @@ function pageFromHash(hash: string): string {
   return (hash.replace(/^#\/?/, '') || 'dashboard').split('/')[0] || 'dashboard';
 }
 
+// Native <dialog>: focus is trapped and Escape closes it. Password fields stay masked.
+function ChangePassword({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [f, setF] = useState({ current: '', next: '', confirm: '' });
+  const act = useAction();
+  useEffect(() => ref.current?.showModal(), []);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (f.next !== f.confirm) {
+      act.setError('The two new passwords do not match');
+      return;
+    }
+    await act.run(() => post('/api/auth/change-password', { currentPassword: f.current, newPassword: f.next }), 'Password changed.');
+  }
+
+  return (
+    <dialog ref={ref} className="dialog" onClose={onClose}>
+      <form onSubmit={submit}>
+        <h2>Change password</h2>
+        <Field label="Current password"><input type="password" autoFocus required autoComplete="current-password" value={f.current} onChange={set('current')} /></Field>
+        <Field label="New password" hint="At least 10 characters, with letters and digits."><input type="password" required minLength={10} autoComplete="new-password" value={f.next} onChange={set('next')} /></Field>
+        <Field label="Confirm new password"><input type="password" required autoComplete="new-password" value={f.confirm} onChange={set('confirm')} /></Field>
+        {act.error ? <Notice kind="error">{act.error}</Notice> : null}
+        {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
+        <div className="row">
+          {act.ok ? null : <button type="submit" className="primary" disabled={act.busy}>{act.busy ? 'Saving...' : 'Change password'}</button>}
+          <button type="button" onClick={() => ref.current?.close()}>{act.ok ? 'Close' : 'Cancel'}</button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
 export function App() {
   const [status, setStatus] = useState<'loading' | 'setup' | 'login' | 'ready'>('loading');
   const [me, setMe] = useState<Me | null>(null);
   const [branchId, setBranchId] = useState<number>(() => Number(localStorage.getItem('lms.branch') ?? 0));
   const [hash, setHash] = useState(window.location.hash);
+  const [pwOpen, setPwOpen] = useState(false);
   const page = pageFromHash(hash);
 
   const loadMe = useCallback(async () => {
@@ -119,19 +156,6 @@ export function App() {
     setStatus('login');
   }
 
-  async function changePassword() {
-    const currentPassword = window.prompt('Current password');
-    if (!currentPassword) return;
-    const newPassword = window.prompt('New password (10+ characters, letters and digits)');
-    if (!newPassword) return;
-    try {
-      await post('/api/auth/change-password', { currentPassword, newPassword });
-      window.alert('Password changed.');
-    } catch (e) {
-      window.alert((e as Error).message);
-    }
-  }
-
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="Main navigation">
@@ -157,13 +181,14 @@ export function App() {
               ))}
             </select>
           </label>
-          <button className="ghost" onClick={() => void changePassword()}>Change password</button>
+          <button className="ghost" onClick={() => setPwOpen(true)}>Change password</button>
           <button className="ghost" onClick={signOut}>Sign out</button>
         </div>
       </aside>
       <main className="content">
         {current ? <div key={hash}>{current.render(session)}</div> : <p>You do not have access to any screen. Ask an administrator.</p>}
       </main>
+      {pwOpen ? <ChangePassword onClose={() => setPwOpen(false)} /> : null}
     </div>
   );
 }

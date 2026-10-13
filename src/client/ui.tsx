@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from './api.ts';
 
 export function Notice({ kind = 'info', children }: { kind?: 'info' | 'ok' | 'error' | 'warn'; children: ReactNode }) {
@@ -16,7 +16,11 @@ export function useAction() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const running = useRef(false);
   async function run<T>(fn: () => Promise<T>, success?: string): Promise<T | undefined> {
+    // A second click while the first request is still running is ignored, so nothing is posted twice.
+    if (running.current) return undefined;
+    running.current = true;
     setBusy(true);
     setError(null);
     setOk(null);
@@ -28,10 +32,94 @@ export function useAction() {
       setError(errorText(e));
       return undefined;
     } finally {
+      running.current = false;
       setBusy(false);
     }
   }
-  return { busy, error, ok, run, setError, setOk };
+  // An error and a success message never show together: setting one clears the other.
+  const showError = (m: string | null) => {
+    setError(m);
+    if (m) setOk(null);
+  };
+  const showOk = (m: string | null) => {
+    setOk(m);
+    if (m) setError(null);
+  };
+  return { busy, error, ok, run, setError: showError, setOk: showOk };
+}
+
+export interface AskOptions {
+  title: string;
+  label: string;
+  hint?: string;
+  initial?: string;
+  secret?: boolean; // mask the text, for passwords
+  optional?: boolean; // an empty answer is allowed
+  minLength?: number;
+  submit?: string;
+}
+
+function AskDialog({ opts, onDone }: { opts: AskOptions; onDone: (v: string | null) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [value, setValue] = useState(opts.initial ?? '');
+  const [problem, setProblem] = useState<string | null>(null);
+  const closed = useRef(false);
+  const finish = (v: string | null) => {
+    if (closed.current) return;
+    closed.current = true;
+    onDone(v);
+  };
+  useEffect(() => ref.current?.showModal(), []);
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const v = value.trim();
+    const min = opts.minLength ?? 1;
+    if (!opts.optional && v.length < min) {
+      setProblem(`Enter at least ${min} characters.`);
+      return;
+    }
+    finish(v);
+  }
+  return (
+    <dialog ref={ref} className="dialog" onClose={() => finish(null)}>
+      <form onSubmit={submit}>
+        <h2>{opts.title}</h2>
+        <Field label={opts.label} hint={opts.hint}>
+          <input
+            autoFocus
+            type={opts.secret ? 'password' : 'text'}
+            autoComplete={opts.secret ? 'new-password' : 'off'}
+            required={!opts.optional}
+            minLength={opts.minLength}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </Field>
+        {problem ? <Notice kind="error">{problem}</Notice> : null}
+        <div className="row">
+          <button type="submit" className="primary">{opts.submit ?? 'OK'}</button>
+          <button type="button" onClick={() => finish(null)}>Cancel</button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+// Replacement for window.prompt: `const answer = await ask({...})` gives the text, or null when cancelled.
+// Render `node` once in the component's output.
+export function useAsk() {
+  const [req, setReq] = useState<{ opts: AskOptions; resolve: (v: string | null) => void } | null>(null);
+  const ask = (opts: AskOptions) => new Promise<string | null>((resolve) => setReq({ opts, resolve }));
+  const node = req ? (
+    <AskDialog
+      opts={req.opts}
+      onDone={(v) => {
+        req.resolve(v);
+        setReq(null);
+      }}
+    />
+  ) : null;
+  return { ask, node };
 }
 
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
