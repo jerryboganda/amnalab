@@ -6,7 +6,20 @@ Ultralight laboratory management system for one Windows PC. It runs locally, use
 - **UI:** React + Vite, served by the local server at `http://127.0.0.1:8080`.
 - **Reports:** [pdfcn](https://github.com/shadcn-labs/pdfcn) components rendered with the Forme engine (WebAssembly, no browser).
 
-## Set up on the PC
+## Install on the lab PC (one click)
+
+1. Copy `AmnaLab-LMS-Setup-<version>.exe` to the lab PC (USB stick) and double-click it. Windows 10 or 11, 64-bit. Nothing else is needed: no Node.js, no internet.
+2. If Windows shows "Windows protected your PC" (the file is not code-signed), choose **More info**, then **Run anyway**.
+3. Setup copies the program to `C:\AmnaLabLMS` (about 115 MB), adds a desktop shortcut and a Start-menu entry, makes the LMS start with Windows, creates a random **backup password** and opens the app. **Write the backup password down**: it is shown once at the end and is needed to restore a backup on another PC.
+4. The first screen creates the laboratory, its first branch and the administrator.
+
+**Update:** run the newer Setup file. The program is replaced, the lab data, settings and backups are kept, and a copy of the database is saved under `backups\pre-update-...` first.
+**Remove:** Windows Settings, Apps, Amna Lab LMS (or Start menu, Uninstall). The lab data and backups stay in `C:\AmnaLabLMS` unless you tick the box to delete them.
+**Unattended:** `Setup.exe /S` with optional `/dir=D:\Lab`, `/nodesktop`, `/nostartup`, `/nolaunch`; `Uninstall.exe /uninstall /S [/purge]`.
+
+Build the installer on a Windows PC with `npm run installer` (needs Node 22+ and internet once; output in `installer\out`). Test an install end to end with `installer\test-installer.ps1`.
+
+## Set up on the PC from source (developers)
 
 ```bash
 npm install

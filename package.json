@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/unit/*.test.ts\"",
     "smoke": "node scripts/smoke.mjs",
-    "verify": "npm run typecheck && npm run build && npm test && npm run smoke"
+    "verify": "npm run typecheck && npm run build && npm test && npm run smoke",
+    "installer": "node installer/build.mjs"
   },
   "dependencies": {
     "@formepdf/core": "^0.28.0",

@@ -13,3 +13,8 @@ coverage/
 *.docx
 .tmp/
 samples/
+
+# One-click installer build output
+installer/stage/
+installer/out/
+installer/obj/

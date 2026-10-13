@@ -7,16 +7,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 
+// SMOKE_URL=http://127.0.0.1:8080 tests an already running, still empty (first-run) server, for example an installed copy.
+const external = process.env.SMOKE_URL;
 const PORT = 8197;
-const BASE = `http://127.0.0.1:${PORT}`;
-const root = mkdtempSync(join(tmpdir(), 'lms-smoke-'));
-const server = spawn(process.execPath, ['dist/server/index.js'], {
-  env: { ...process.env, LMS_ROOT: root, LMS_DB_FILE: join(root, 'data', 'lms.db'), LMS_PORT: String(PORT) },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const BASE = external ?? `http://127.0.0.1:${PORT}`;
+const root = external ? null : mkdtempSync(join(tmpdir(), 'lms-smoke-'));
+const server = external
+  ? null
+  : spawn(process.execPath, ['dist/server/index.js'], {
+      env: { ...process.env, LMS_ROOT: root, LMS_DB_FILE: join(root, 'data', 'lms.db'), LMS_PORT: String(PORT) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 let serverLog = '';
-server.stdout.on('data', (d) => (serverLog += d));
-server.stderr.on('data', (d) => (serverLog += d));
+server?.stdout.on('data', (d) => (serverLog += d));
+server?.stderr.on('data', (d) => (serverLog += d));
 
 let passed = 0;
 const step = (name) => console.log(`- ${name}`);
@@ -303,7 +307,7 @@ try {
   assert.equal((await admin('PATCH', `/api/admin/branches/${branchId}`, { isActive: false })).status, 409, 'the last active branch cannot be deactivated');
   const health = (await admin('GET', '/api/ops/health')).json;
   assert.equal(health.dbCheck, 'ok');
-  assert.equal(health.backup.configured, false);
+  assert.equal(typeof health.backup.configured, 'boolean');
   passed++;
 
   console.log(`\nSmoke test passed: ${passed} checkpoints.`);
@@ -312,6 +316,6 @@ try {
   console.error('--- server log ---\n' + serverLog.slice(-4000));
   process.exitCode = 1;
 } finally {
-  server.kill();
-  if (!process.env.SMOKE_KEEP) rmSync(root, { recursive: true, force: true });
+  server?.kill();
+  if (root && !process.env.SMOKE_KEEP) rmSync(root, { recursive: true, force: true });
 }

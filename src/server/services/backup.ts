@@ -165,7 +165,9 @@ export function maybeAutoBackup(db: DatabaseSync): void {
     const now = new Date();
     const due = new Date(now);
     due.setHours(hour, 0, 0, 0);
-    if (now < due || Date.now() - lastAutoFailure < 30 * 60_000) return;
+    // The very first backup is made straight away, so a new installation is never without one until 02:00.
+    const never = !db.prepare('SELECT id FROM backups LIMIT 1').get();
+    if ((now < due && !never) || Date.now() - lastAutoFailure < 30 * 60_000) return;
     const done = db.prepare("SELECT id FROM backups WHERE kind = 'auto' AND created_at >= ? LIMIT 1").get(due.toISOString());
     if (done) return;
     try {
