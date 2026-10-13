@@ -31,7 +31,7 @@ const TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = {
 };
 
 export function Notifications({ s }: { s: Session }) {
-  const [rows, setRows] = useState<Message[]>([]);
+  const [rows, setRows] = useState<Message[] | null>(null);
   const [status, setStatus] = useState('');
   const [channel, setChannel] = useState('');
   const act = useAction();
@@ -80,7 +80,7 @@ export function Notifications({ s }: { s: Session }) {
       <Panel>
         <Table
           head={['When', 'Channel', 'Patient', 'Report', 'To', 'Status', 'Tries', 'Actions']}
-          rows={rows.map((m) => [
+          rows={(rows ?? []).map((m) => [
             when(m.created_at),
             m.channel,
             `${m.patient_name} (${m.mrn})`,
@@ -110,7 +110,7 @@ export function Notifications({ s }: { s: Session }) {
               ) : null}
             </span>,
           ])}
-          empty="No messages. Send a report from Orders or Patients."
+          empty={rows === null ? (act.error ? 'The messages could not be loaded.' : 'Loading...') : 'No messages. Send a report from Orders or Patients.'}
         />
       </Panel>
       <Panel title="How delivery works">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
-import { get, post, SESSION_EXPIRED } from './api.ts';
+import { get, post, SERVER_OFFLINE, SESSION_EXPIRED } from './api.ts';
 import { Login, Setup } from './pages/Auth.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { Patients } from './pages/Patients.tsx';
@@ -84,7 +84,45 @@ function ChangePassword({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Shows a banner while the server is unreachable, checks every 3 seconds, and reloads the screen by itself
+// as soon as the server answers again (for example after the launcher restarts it).
 export function App() {
+  const [offline, setOffline] = useState(false);
+  const [generation, setGeneration] = useState(0);
+
+  useEffect(() => {
+    const down = () => setOffline(true);
+    window.addEventListener(SERVER_OFFLINE, down);
+    return () => window.removeEventListener(SERVER_OFFLINE, down);
+  }, []);
+
+  useEffect(() => {
+    if (!offline) return;
+    const timer = setInterval(() => {
+      fetch('/api/health', { cache: 'no-store' })
+        .then((r) => {
+          if (!r.ok) return;
+          setOffline(false);
+          setGeneration((g) => g + 1);
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [offline]);
+
+  return (
+    <>
+      {offline ? (
+        <div className="offline-banner" role="alert">
+          The Amna Lab LMS server is not running on this PC. Start it from the desktop shortcut. This page reconnects by itself.
+        </div>
+      ) : null}
+      <AppInner key={generation} />
+    </>
+  );
+}
+
+function AppInner() {
   const [status, setStatus] = useState<'loading' | 'setup' | 'login' | 'ready'>('loading');
   const [me, setMe] = useState<Me | null>(null);
   const [branchId, setBranchId] = useState<number>(() => Number(localStorage.getItem('lms.branch') ?? 0));

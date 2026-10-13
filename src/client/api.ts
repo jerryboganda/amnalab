@@ -13,6 +13,8 @@ type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 // Emitted when the server says the session is gone, so the shell can show the sign-in screen.
 export const SESSION_EXPIRED = 'lms:session-expired';
+// Emitted when the server cannot be reached at all (not running, or restarting).
+export const SERVER_OFFLINE = 'lms:server-offline';
 
 export async function api<T = any>(method: Method, path: string, body?: unknown): Promise<T> {
   let res: Response;
@@ -27,6 +29,7 @@ export async function api<T = any>(method: Method, path: string, body?: unknown)
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
+    window.dispatchEvent(new Event(SERVER_OFFLINE));
     throw new ApiError(0, 'offline', 'Cannot reach the Amna Lab LMS server on this PC. Start it from the desktop shortcut, then try again.');
   }
   const text = await res.text();

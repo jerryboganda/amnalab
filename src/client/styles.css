@@ -200,3 +200,5 @@ input[type='file'] { padding: 0.3rem; }
 .dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
 .dialog .row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
 .dialog .field { margin-top: 0.7rem; }
+
+.offline-banner { position: sticky; top: 0; z-index: 100; padding: 0.6rem 1rem; text-align: center; font-weight: 600; background: #b42318; color: #fff; }
