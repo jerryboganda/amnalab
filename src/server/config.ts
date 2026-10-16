@@ -22,7 +22,7 @@ export const config = {
   clientDir: join(ROOT, 'dist', 'client'),
   sessionCookie: 'lms_session',
   sessionIdleMinutes: 30,
-  maxBodyBytes: 25 * 1024 * 1024,
+  maxBodyBytes: 200 * 1024 * 1024, // a backup file chosen for restore travels in one request
 };
 
 // Local-only secrets and integration settings. Lives in data/ which is git-ignored.

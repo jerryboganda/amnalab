@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { config } from './config.ts';
 import { openDb, schemaVersion } from './db.ts';
+import { applyPendingRestore } from './services/restore.ts';
 import { HttpError, JsonResponse, RawResponse, Router, readBody, sendJson, sendRaw, type Ctx } from './http.ts';
 import { authenticate } from './security.ts';
 import { ensureDirs } from './services/files.ts';
@@ -40,6 +41,7 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
 };
 
+applyPendingRestore();
 const db = openDb(config.dbFile);
 ensureDirs();
 seedCatalogIfEmpty(db);

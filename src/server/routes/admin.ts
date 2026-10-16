@@ -1,5 +1,5 @@
 import { statfsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Router } from '../http.ts';
 import { RawResponse, arr, badRequest, bool, conflict, forbidden, int, intParam, json, notFound, oneOf, optStr, str } from '../http.ts';
@@ -12,7 +12,8 @@ import { sampleInvoice, sampleReport } from '../services/sample-docs.ts';
 import { renderReportPdf } from '../services/report-pdf.tsx';
 import { renderInvoicePdf } from '../services/invoice-pdf.tsx';
 import { toCsv } from '../services/csv.ts';
-import { backupStatus, createBackup, listBackups } from '../services/backup.ts';
+import { backupStatus, createBackup, decryptBuffer, isV1Backup, listBackups, requirePassphrase } from '../services/backup.ts';
+import { schedulePendingRestore } from '../services/restore.ts';
 import { config } from '../config.ts';
 import { dayEndUtc, dayStartUtc, isValidTimezone, nowIso } from '../util.ts';
 
@@ -451,5 +452,46 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
   r.get('/api/ops/backups', (ctx) => {
     requirePerm(ctx.user!, 'ops.backup');
     return listBackups(db);
+  });
+
+  // A copy of a backup file to keep on a USB stick or another PC.
+  r.get('/api/ops/backups/:id/download', (ctx) => {
+    requirePerm(ctx.user!, 'ops.backup');
+    const row = db.prepare('SELECT file FROM backups WHERE id = ?').get(intParam(ctx.params.id!, 'id')) as { file: string } | undefined;
+    const data = row ? readIfExists(row.file) : null;
+    if (!row || !data) throw notFound('Backup file not found');
+    const name = basename(row.file);
+    return new RawResponse('application/octet-stream', data, { 'Content-Disposition': `attachment; filename="${name}"` });
+  });
+
+  // One-click restore. Body: { backupId } for a backup made here, or { fileBase64, passphrase? } for a file from another PC.
+  // The backup is checked first (wrong password or damaged file is refused), the current data is backed up,
+  // then the server restarts and swaps the data in (see services/restore.ts).
+  r.post('/api/ops/restore', (ctx) => {
+    const actor = ctx.user!;
+    requirePerm(actor, 'ops.backup');
+    const b = ctx.body;
+    let raw: Buffer;
+    if (b.backupId !== undefined) {
+      const row = db.prepare('SELECT file FROM backups WHERE id = ?').get(int(b, 'backupId', { min: 1 })) as { file: string } | undefined;
+      const data = row ? readIfExists(row.file) : null;
+      if (!data) throw notFound('Backup file not found');
+      raw = data;
+    } else {
+      raw = Buffer.from(str(b, 'fileBase64', { max: 400_000_000 }), 'base64');
+    }
+    const pass = typeof b.passphrase === 'string' && b.passphrase.trim() ? b.passphrase.trim() : requirePassphrase();
+    const plain = decryptBuffer(raw, pass); // throws a clear message for a wrong password or a damaged file
+    let safety: string | null = null;
+    try {
+      safety = createBackup(db, 'manual', actor).file; // today's data is kept in case this was a mistake
+    } catch {
+      /* a damaged database cannot always be backed up; the old file is still kept at restore time */
+    }
+    audit(db, { actor, action: 'backup.restore', entity: 'backup', after: { safetyBackup: safety } });
+    schedulePendingRestore(plain, isV1Backup(raw));
+    // Leave after the answer is sent; the launcher starts the server again within a few seconds.
+    setTimeout(() => process.exit(0), 700).unref();
+    return { ok: true, restarting: true, safetyBackup: safety };
   });
 }

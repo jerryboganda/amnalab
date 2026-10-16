@@ -78,6 +78,29 @@ $s = Session
 Check 'data intact after crash' ((Api 'GET' '/api/patients' $s).Count -eq $before)
 Check 'previous log kept' (Test-Path "$Dir\data\server.prev.log")
 
+Write-Host "=== 3b. one-click restore from inside the program"
+$s = Session
+$bk = Api 'POST' '/api/ops/backup' $s
+$branch = (Api 'GET' '/api/branches' $s)[0].id
+$extra = Api 'POST' '/api/patients' $s @{ branchId = $branch; fullName = 'Added After Backup'; gender = 'M'; dob = '1990-01-01'; phone = '0301 5550001'; consent = @{ whatsapp = $false; email = $false; sms = $false } }
+Check 'patient added after the backup' ((Api 'GET' '/api/patients' $s).Count -eq $before + 1)
+$dl = Join-Path $env:TEMP 'lms-download.lmsbak'
+Invoke-WebRequest "$Url/api/ops/backups/$($bk.id)/download" -WebSession $s -OutFile $dl
+Check 'backup can be downloaded' ((Get-Item $dl).Length -eq (Get-Item $bk.file).Length)
+Remove-Item $dl -Force
+$backupsBefore = @(Get-ChildItem "$Dir\backups\*.lmsbak").Count
+$r = Api 'POST' '/api/ops/restore' $s @{ backupId = $bk.id }
+Check 'restore accepted' ($r.ok -eq $true)
+Check 'server restarted for the restore' (Down 15)
+Check 'server back up by itself' (Up 60)
+$s = Session
+Check 'data is back to the backup (extra patient gone)' ((Api 'GET' '/api/patients' $s).Count -eq $before)
+Check 'safety backup of the data before restoring' (@(Get-ChildItem "$Dir\backups\*.lmsbak").Count -gt $backupsBefore)
+Check 'old database kept' (@(Get-ChildItem "$Dir\backups" -Filter 'pre-restore-*.db').Count -ge 1)
+$bad = $false
+try { Api 'POST' '/api/ops/restore' $s @{ fileBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('not a backup')) } | Out-Null } catch { $bad = $true }
+Check 'a damaged file is refused and nothing changes' ($bad -and (Api 'GET' '/api/patients' $s).Count -eq $before)
+
 Write-Host "=== 4. second launch does not start a second server"
 $n = @(RuntimeNode).Count
 Start-Process "$Dir\AmnaLabLMS.exe" -ArgumentList '/background'

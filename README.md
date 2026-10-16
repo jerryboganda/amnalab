@@ -13,7 +13,8 @@ Ultralight laboratory management system for one Windows PC. It runs locally, use
 3. Setup copies the program to `C:\AmnaLabLMS` (about 115 MB), adds a desktop shortcut and a Start-menu entry, makes the LMS start with Windows, creates a random **backup password** and opens the app. **Write the backup password down**: it is shown once at the end and is needed to restore a backup on another PC.
 4. The first screen creates the laboratory, its first branch and the administrator.
 
-**Update:** run the newer Setup file. The program is replaced, the lab data, settings and backups are kept, and a copy of the database is saved under `backups\pre-update-...` first.
+**Update:** just run the newer Setup file on top of the old one; there is no need to uninstall first. The program is replaced, the lab data, settings and backups are kept, and a copy of the database is saved under `backups\pre-update-...` first.
+**Backup and restore:** both are one click under Admin, Backup & health. **Back up now** saves everything (database, reports, attachments, branding) as one encrypted file; **Download** copies it to a USB stick. **Restore** next to any backup (or **Restore from a file** for a file from another PC) puts that moment back: today's data is saved first, the program restarts by itself in a few seconds, and you sign in again.
 **Remove:** Windows Settings, Apps, Amna Lab LMS (or Start menu, Uninstall). The lab data and backups stay in `C:\AmnaLabLMS` unless you tick the box to delete them.
 **Unattended:** `Setup.exe /S` with optional `/dir=D:\Lab`, `/nodesktop`, `/nostartup`, `/nolaunch`; `Uninstall.exe /uninstall /S [/purge]`.
 

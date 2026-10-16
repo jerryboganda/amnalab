@@ -462,12 +462,49 @@ function Ops({ s }: { s: Session }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const { ask, node } = useAsk();
+  const [restoring, setRestoring] = useState(false);
+
   async function backupNow() {
-    await act.run(() => post('/api/ops/backup'), 'Encrypted backup created');
+    await act.run(() => post('/api/ops/backup'), 'Backup saved. Use Download to keep a copy on a USB stick or another PC.');
     load();
+  }
+
+  // One click: the server checks the backup, saves today's data first, restarts and swaps the data in.
+  // The page then reconnects by itself (see the reconnecting banner in App.tsx) and asks for a sign-in.
+  async function restore(body: Record<string, unknown>, what: string) {
+    if (!window.confirm(`Restore ${what}?\n\nEverything entered after that backup is replaced. Today's data is saved as a backup first, and the program restarts for a few seconds.`)) return;
+    const out = await act.run(() => post('/api/ops/restore', body));
+    if (out) {
+      setRestoring(true);
+      setTimeout(() => window.location.reload(), 9000);
+    }
+  }
+
+  async function restoreFromFile(file: File | undefined) {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file, 190).catch((e: Error) => {
+      act.setError(e.message);
+      return null;
+    });
+    if (!dataUrl) return;
+    const pass = await ask({
+      title: 'Backup password',
+      label: 'Password of this backup file',
+      hint: 'Leave empty if the file was made on this PC. For a file from another PC, enter the backup password shown when that PC was installed.',
+      secret: true,
+      optional: true,
+      submit: 'Continue',
+    });
+    if (pass === null) return;
+    await restore({ fileBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), passphrase: pass || undefined }, `the file "${file.name}"`);
+  }
+  if (restoring) {
+    return <Notice kind="info">Restoring the backup. The program restarts and this page reloads by itself, then sign in again.</Notice>;
   }
   return (
     <>
+      {node}
       <Panel title="System health">
         {health ? (
           <dl className="kv">
@@ -489,13 +526,33 @@ function Ops({ s }: { s: Session }) {
         ) : <p className="muted">Health information unavailable</p>}
       </Panel>
       {s.can('ops.backup') ? (
-        <Panel title="Backups" actions={<button className="primary" disabled={act.busy} onClick={() => void backupNow()}>Back up now</button>}>
+        <Panel
+          title="Backups"
+          actions={
+            <>
+              <button className="primary" disabled={act.busy} onClick={() => void backupNow()}>Back up now</button>
+              <label className="button-like">
+                Restore from a file
+                <input type="file" accept=".lmsbak" hidden onChange={(e) => { void restoreFromFile(e.target.files?.[0]); e.target.value = ''; }} />
+              </label>
+            </>
+          }
+        >
           {act.error ? <Notice kind="error">{act.error}</Notice> : null}
           {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
-          <p className="muted small">Backups are encrypted. A backup is also made automatically each night at the hour set in data/config.json. Restore with the restore tool on the server PC.</p>
+          <p className="muted small">Backups are encrypted and include patients, results, reports, attachments and branding. One is made automatically every day. Press Restore on any line to go back to that moment.</p>
           <Table
-            head={['When', 'Kind', 'File', 'Size (KB)']}
-            rows={backups.map((b) => [when(String(b.created_at)), String(b.kind), <span key="f" className="small">{String(b.file)}</span>, Math.round(Number(b.size) / 1024)])}
+            head={['When', 'Kind', 'File', 'Size (KB)', '']}
+            rows={backups.map((b) => [
+              when(String(b.created_at)),
+              String(b.kind),
+              <span key="f" className="small">{String(b.file)}</span>,
+              Math.round(Number(b.size) / 1024),
+              <span key="a" className="row-actions">
+                <a className="button-like" href={`/api/ops/backups/${String(b.id)}/download`}>Download</a>
+                <button disabled={act.busy} onClick={() => void restore({ backupId: Number(b.id) }, `the backup of ${when(String(b.created_at))}`)}>Restore</button>
+              </span>,
+            ])}
             empty="No backups yet"
           />
         </Panel>
