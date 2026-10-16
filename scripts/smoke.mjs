@@ -63,10 +63,7 @@ async function waitForServer() {
 try {
   await waitForServer();
   const admin = client();
-  const tech = client();
-  const pathologist = client();
   const reception = client();
-  const collector = client();
 
   step('health and first-run setup');
   assert.equal((await admin('GET', '/api/health')).json.status, 'ok');
@@ -95,18 +92,9 @@ try {
   step('staff accounts');
   const branches = (await admin('GET', '/api/branches')).json;
   const branchId = branches[0].id;
-  for (const u of [
-    { username: 'techno', fullName: 'Lab Technician', role: 'technician', password: 'Tech-Pass-2026', branchIds: [branchId] },
-    { username: 'drali', fullName: 'Dr Ali', role: 'pathologist', password: 'Path-Pass-2026', branchIds: [branchId] },
-    { username: 'reception1', fullName: 'Front Desk', role: 'reception', password: 'Rec-Pass-2026', branchIds: [branchId] },
-    { username: 'collector1', fullName: 'Bilal Collector', role: 'collector', password: 'Col-Pass-2026', branchIds: [branchId] },
-  ]) {
-    assert.equal((await admin('POST', '/api/admin/users', u)).status, 201);
-  }
-  assert.equal((await tech('POST', '/api/auth/login', { username: 'techno', password: 'Tech-Pass-2026' })).status, 200);
-  assert.equal((await pathologist('POST', '/api/auth/login', { username: 'drali', password: 'Path-Pass-2026' })).status, 200);
+  assert.equal((await admin('POST', '/api/admin/users', { username: 'reception1', fullName: 'Front Desk', role: 'reception', password: 'Rec-Pass-2026', branchIds: [branchId] })).status, 201);
+  assert.equal((await admin('POST', '/api/admin/users', { username: 'doctor1', fullName: 'Old Role', role: 'pathologist', password: 'Path-Pass-2026', branchIds: [branchId] })).status, 422, 'removed roles cannot be created');
   assert.equal((await reception('POST', '/api/auth/login', { username: 'reception1', password: 'Rec-Pass-2026' })).status, 200);
-  assert.equal((await collector('POST', '/api/auth/login', { username: 'collector1', password: 'Col-Pass-2026' })).status, 200);
   passed++;
 
   step('catalog: starter Pakistan-market tests with approved starter ranges');
@@ -155,33 +143,33 @@ try {
   step('specimen collection and receipt');
   const specimens = order.json.specimens;
   for (const sp of specimens) {
-    assert.equal((await collector('POST', `/api/specimens/${sp.id}/collect`, { collectorName: 'Bilal' })).status, 200);
-    assert.equal((await tech('POST', `/api/specimens/${sp.id}/receive`)).status, 200);
+    assert.equal((await reception('POST', `/api/specimens/${sp.id}/collect`, { collectorName: 'Bilal' })).status, 200);
+    assert.equal((await reception('POST', `/api/specimens/${sp.id}/receive`)).status, 200);
   }
-  const labelRes = await tech('GET', `/api/specimens/${specimens[0].id}/label`, undefined, { raw: true });
+  const labelRes = await reception('GET', `/api/specimens/${specimens[0].id}/label`, undefined, { raw: true });
   assert.equal(labelRes.status, 200);
   assert.match(labelRes.headers.get('content-security-policy') ?? '', /script-src 'unsafe-inline'/);
   passed++;
 
-  step('results entry: technician enters, pathologist reviews and authorizes');
+  step('results entry: the administrator enters, reviews and authorizes; reception cannot');
   const itemIds = order.json.items.map((i) => i.id);
   const cbcItem = order.json.items.find((i) => i.test_id === cbc.id);
   const fbsItem = order.json.items.find((i) => i.test_id === fbs.id);
-  const cbcView = (await tech('GET', `/api/order-items/${cbcItem.id}`)).json;
+  const cbcView = (await admin('GET', `/api/order-items/${cbcItem.id}`)).json;
   const values = cbcView.parameters
     .filter((p) => p.resultType === 'numeric')
     .map((p) => ({ parameterId: p.id, valueNumeric: p.code === 'HGB' ? 12.5 : p.code === 'WBC' ? 7.2 : p.code === 'PLT' ? 250 : (p.range?.low ?? 1) + 0.1 }));
-  assert.equal((await tech('POST', `/api/order-items/${cbcItem.id}/results`, { values })).status, 200);
-  const fbsView = (await tech('GET', `/api/order-items/${fbsItem.id}`)).json;
+  assert.equal((await admin('POST', `/api/order-items/${cbcItem.id}/results`, { values })).status, 200);
+  const fbsView = (await admin('GET', `/api/order-items/${fbsItem.id}`)).json;
   const glucose = fbsView.parameters.find((p) => p.code === 'FBS');
-  assert.equal((await tech('POST', `/api/order-items/${fbsItem.id}/results`, { values: [{ parameterId: glucose.id, valueNumeric: 92 }] })).status, 200);
-  assert.equal((await tech('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 403, 'technician cannot authorize');
-  assert.equal((await tech('POST', `/api/order-items/${cbcItem.id}/review`)).status, 409, 'the person who entered a result cannot review it');
-  assert.equal((await pathologist('POST', `/api/order-items/${cbcItem.id}/review`)).status, 200);
-  assert.equal((await pathologist('POST', `/api/order-items/${fbsItem.id}/review`)).status, 200);
-  assert.equal((await tech('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 403);
-  assert.equal((await pathologist('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 200);
-  const last = await pathologist('POST', `/api/order-items/${fbsItem.id}/authorize`);
+  assert.equal((await admin('POST', `/api/order-items/${fbsItem.id}/results`, { values: [{ parameterId: glucose.id, valueNumeric: 92 }] })).status, 200);
+  assert.equal((await reception('POST', `/api/order-items/${cbcItem.id}/results`, { values })).status, 403, 'reception cannot enter results');
+  assert.equal((await reception('POST', `/api/order-items/${cbcItem.id}/review`)).status, 403, 'reception cannot review');
+  assert.equal((await reception('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 403, 'reception cannot authorize');
+  assert.equal((await admin('POST', `/api/order-items/${cbcItem.id}/review`)).status, 200);
+  assert.equal((await admin('POST', `/api/order-items/${fbsItem.id}/review`)).status, 200);
+  assert.equal((await admin('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 200);
+  const last = await admin('POST', `/api/order-items/${fbsItem.id}/authorize`);
   assert.equal(last.status, 200);
   assert.equal(last.json.orderCompleted, true);
   assert.ok(last.json.report?.reportNo, 'authorizing the last test must issue a report');
@@ -200,18 +188,15 @@ try {
   passed++;
 
   step('amendment: amend -> review -> re-authorize issues an amended version 2');
-  assert.equal((await admin('POST', '/api/admin/users', { username: 'drsana', fullName: 'Dr Sana', role: 'pathologist', password: 'Path-Pass-2027', branchIds: [branchId] })).status, 201);
-  const drsana = client();
-  assert.equal((await drsana('POST', '/api/auth/login', { username: 'drsana', password: 'Path-Pass-2027' })).status, 200);
-  const hgb = (await pathologist('GET', `/api/order-items/${cbcItem.id}`)).json.parameters.find((p) => p.code === 'HGB');
-  const amended = await pathologist('POST', `/api/results/${hgb.result.id}/amend`, { valueNumeric: 6.5, reason: 'Transcription error corrected' });
+  const hgb = (await admin('GET', `/api/order-items/${cbcItem.id}`)).json.parameters.find((p) => p.code === 'HGB');
+  const amended = await admin('POST', `/api/results/${hgb.result.id}/amend`, { valueNumeric: 6.5, reason: 'Transcription error corrected' });
   assert.equal(amended.status, 200, JSON.stringify(amended.json));
-  const afterAmend = (await pathologist('GET', `/api/order-items/${cbcItem.id}`)).json.parameters.find((p) => p.code === 'HGB');
+  const afterAmend = (await admin('GET', `/api/order-items/${cbcItem.id}`)).json.parameters.find((p) => p.code === 'HGB');
   assert.equal(afterAmend.result.flag, 'LL', 'amended value must be re-flagged (critical low)');
-  assert.equal((await pathologist('POST', `/api/order-items/${cbcItem.id}/review`)).status, 409, 'the amending person cannot review it');
-  assert.equal((await tech('POST', `/api/order-items/${cbcItem.id}/review`)).status, 200);
-  assert.equal((await drsana('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 422, 'critical value needs a notification record');
-  const reauth = await drsana('POST', `/api/order-items/${cbcItem.id}/authorize`, { criticalNotifiedTo: 'Dr Imran (ER), 10:15' });
+  assert.equal((await reception('POST', `/api/results/${hgb.result.id}/amend`, { valueNumeric: 1, reason: 'Not allowed for reception' })).status, 403);
+  assert.equal((await admin('POST', `/api/order-items/${cbcItem.id}/review`)).status, 200);
+  assert.equal((await admin('POST', `/api/order-items/${cbcItem.id}/authorize`)).status, 422, 'critical value needs a notification record');
+  const reauth = await admin('POST', `/api/order-items/${cbcItem.id}/authorize`, { criticalNotifiedTo: 'Dr Imran (ER), 10:15' });
   assert.equal(reauth.status, 200, JSON.stringify(reauth.json));
   assert.equal(reauth.json.report?.version, 2);
   const v2 = (await admin('GET', `/api/orders/${orderId}/reports`)).json;
@@ -225,18 +210,18 @@ try {
   const fbs2 = order2.items.find((i) => i.test_id === fbs.id);
   const edtaSpec = order2.specimens.find((x) => x.id === cbc2.specimen_id);
   const fluSpec = order2.specimens.find((x) => x.id === fbs2.specimen_id);
-  await collector('POST', `/api/specimens/${edtaSpec.id}/collect`, { collectorName: 'Bilal' });
-  await tech('POST', `/api/specimens/${edtaSpec.id}/receive`);
-  const view2 = (await tech('GET', `/api/order-items/${cbc2.id}`)).json;
+  await reception('POST', `/api/specimens/${edtaSpec.id}/collect`, { collectorName: 'Bilal' });
+  await reception('POST', `/api/specimens/${edtaSpec.id}/receive`);
+  const view2 = (await admin('GET', `/api/order-items/${cbc2.id}`)).json;
   const hgbParam = view2.parameters.find((p) => p.code === 'HGB');
-  assert.equal((await tech('POST', `/api/order-items/${cbc2.id}/results`, { values: [{ parameterId: hgbParam.id, valueNumeric: 13 }] })).status, 200);
-  assert.equal((await pathologist('POST', `/api/order-items/${cbc2.id}/review`)).status, 200);
-  const partial = await drsana('POST', `/api/order-items/${cbc2.id}/authorize`);
+  assert.equal((await admin('POST', `/api/order-items/${cbc2.id}/results`, { values: [{ parameterId: hgbParam.id, valueNumeric: 13 }] })).status, 200);
+  assert.equal((await admin('POST', `/api/order-items/${cbc2.id}/review`)).status, 200);
+  const partial = await admin('POST', `/api/order-items/${cbc2.id}/authorize`);
   assert.equal(partial.status, 409, 'authorizing with missing parameters must fail');
   assert.match(partial.json.message, /missing/i);
-  await collector('POST', `/api/specimens/${fluSpec.id}/collect`, { collectorName: 'Bilal' });
-  assert.equal((await tech('POST', `/api/specimens/${fluSpec.id}/reject`, { reason: 'Haemolysed sample', recollect: false })).status, 200);
-  const re = await tech('POST', `/api/specimens/${fluSpec.id}/recollect`);
+  await reception('POST', `/api/specimens/${fluSpec.id}/collect`, { collectorName: 'Bilal' });
+  assert.equal((await reception('POST', `/api/specimens/${fluSpec.id}/reject`, { reason: 'Haemolysed sample', recollect: false })).status, 200);
+  const re = await reception('POST', `/api/specimens/${fluSpec.id}/recollect`);
   assert.equal(re.status, 201, JSON.stringify(re.json));
   assert.equal(re.json.status, 'expected');
   const cancel = await reception('POST', `/api/order-items/${fbs2.id}/cancel`, { reason: 'Patient left before recollection' });
@@ -277,7 +262,8 @@ try {
   assert.equal(stock.onHand, 70);
   const lotId = stock.lots[0].lotId;
   assert.equal((await admin('POST', '/api/inventory/adjustments', { branchId, lotId, qty: -2, reason: 'Count correction' })).status, 201);
-  assert.equal((await admin('POST', '/api/inventory/adjustments', { branchId, lotId, qty: -40, reason: 'Count correction big' })).status, 400, 'large adjustment needs approver');
+  assert.equal((await admin('POST', '/api/inventory/adjustments', { branchId, lotId, qty: -40, reason: 'Count correction big' })).status, 201, 'the administrator approves a large adjustment alone');
+  assert.equal((await reception('GET', '/api/inventory/stock')).status, 403, 'reception has no inventory access');
   passed++;
 
   step('messages: WhatsApp is staff-operated and needs consent');
@@ -299,10 +285,24 @@ try {
   }
   passed++;
 
+  step('roles: reception cannot refund, void, close the day or reach admin screens; admin can');
+  const paid = (await admin('GET', `/api/invoices/${order.json.invoice.id}`)).json;
+  assert.equal((await reception('POST', `/api/invoices/${paid.id}/refund`, { amountPkr: 10, reason: 'Wrong test billed' })).status, 403, 'reception cannot refund');
+  assert.equal((await reception('POST', `/api/invoices/${paid.id}/void`, { reason: 'Duplicate invoice' })).status, 403, 'reception cannot void');
+  assert.equal((await reception('POST', '/api/billing/closing', { branchId, date: today, countedPkr: 0 })).status, 403, 'reception cannot close the day');
+  for (const path of ['/api/admin/users', '/api/admin/audit', '/api/ops/backups', '/api/worklists', '/api/catalog/departments']) {
+    assert.equal((await reception('GET', path)).status, 403, `reception must not reach ${path}`);
+  }
+  assert.equal((await reception('POST', '/api/admin/users', { username: 'x1', fullName: 'X', role: 'admin', password: 'Some-Pass-2026' })).status, 403);
+  const discountByReception = await reception('POST', '/api/orders', { branchId, patientId, testIds: [fbs.id], discount: { type: 'percent', value: 10, reason: 'Staff relative', approver: { username: 'admin', password: 'Admin-Pass-2026' } } });
+  assert.equal(discountByReception.status, 201, 'a discount is allowed when the administrator types their password');
+  assert.equal((await admin('POST', `/api/invoices/${paid.id}/refund`, { amountPkr: 10, reason: 'Wrong test billed' })).status, 201, 'the administrator refunds without a second person');
+  passed++;
+
   step('hardening: hostile input is refused with 4xx, never a crash');
   assert.equal((await admin('PUT', '/api/admin/settings', { discount_caps: null })).status, 400);
   assert.equal((await admin('GET', '/api/admin/audit?from=2026-13-45')).status, 422);
-  assert.equal((await tech('POST', '/api/order-items/1/results', { values: [null] })).status, 422);
+  assert.equal((await admin('POST', '/api/order-items/1/results', { values: [null] })).status, 422);
   assert.equal((await admin('PUT', '/api/catalog/tests/1/reagents', { items: [null] })).status, 422);
   assert.equal((await admin('PATCH', `/api/admin/branches/${branchId}`, { isActive: false })).status, 409, 'the last active branch cannot be deactivated');
   const health = (await admin('GET', '/api/ops/health')).json;

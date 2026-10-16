@@ -238,8 +238,12 @@ function NewOrder({ s, onCreated }: { s: Session; onCreated: (id: number) => voi
               </Field>
               <Field label="Value"><input type="number" min={0} value={discount.value} onChange={(e) => setDiscount({ ...discount, value: e.target.value })} /></Field>
               <Field label="Reason"><input value={discount.reason} onChange={(e) => setDiscount({ ...discount, reason: e.target.value })} /></Field>
-              <Field label="Approver username" hint="Needed only when the discount is above your limit"><input value={discount.approverUser} onChange={(e) => setDiscount({ ...discount, approverUser: e.target.value })} /></Field>
-              <Field label="Approver password"><input type="password" value={discount.approverPass} onChange={(e) => setDiscount({ ...discount, approverPass: e.target.value })} autoComplete="off" /></Field>
+              {s.can('billing.discount_override') ? null : (
+                <>
+                  <Field label="Administrator username" hint="Any discount needs the administrator to type their username and password here"><input value={discount.approverUser} onChange={(e) => setDiscount({ ...discount, approverUser: e.target.value })} /></Field>
+                  <Field label="Administrator password"><input type="password" value={discount.approverPass} onChange={(e) => setDiscount({ ...discount, approverPass: e.target.value })} autoComplete="off" /></Field>
+                </>
+              )}
             </div>
           </fieldset>
           <fieldset>

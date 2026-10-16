@@ -543,4 +543,11 @@ export const MIGRATIONS: Migration[] = [
       CREATE UNIQUE INDEX invoices_verification ON invoices(verification_code);
     `,
   },
+  {
+    // Only two roles remain (admin, reception). Anyone with a removed role becomes reception.
+    name: '011_two_roles',
+    sql: `
+      UPDATE users SET role = 'reception' WHERE role NOT IN ('admin', 'reception');
+    `,
+  },
 ];

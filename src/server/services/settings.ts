@@ -8,7 +8,7 @@ export interface Settings {
 }
 
 export const SETTING_DEFAULTS: Settings = {
-  discount_caps: { admin: 100, branch_manager: 100, pathologist: 0, cashier: 5, reception: 0 },
+  discount_caps: { admin: 100, reception: 0 },
   adjustment_approval_threshold: 10,
 };
 

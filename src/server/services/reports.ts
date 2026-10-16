@@ -195,7 +195,7 @@ async function generateUnlocked(
     })),
     incharge: design.incharge,
     signers: signerRows.map((x) => ({
-      label: x.role === 'pathologist' ? 'Consultant Pathologist' : x.role.replace(/_/g, ' '),
+      label: 'Consultant Pathologist',
       name: x.name,
       qualifications: x.qualifications,
       signatureDataUri: dataUri(x.signature_path, 'image/png'),

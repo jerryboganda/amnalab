@@ -423,7 +423,7 @@ export function registerOrders(r: Router, db: DatabaseSync) {
   // Worklists: items waiting for or in processing, filtered by department, priority and date.
   r.get('/api/worklists', (ctx) => {
     const user = ctx.user!;
-    if (!user.perms.has('results.enter') && !user.perms.has('results.review') && !user.perms.has('specimens.write')) {
+    if (!user.perms.has('results.enter') && !user.perms.has('results.review') && !user.perms.has('results.authorize')) {
       throw forbidden('worklists');
     }
     const q = ctx.query;

@@ -75,7 +75,7 @@ export function registerAdmin(r: Router, db: DatabaseSync) {
     const problem = passwordProblem(password);
     if (problem) throw badRequest(problem);
     const branchIds = (Array.isArray(b.branchIds) ? (b.branchIds as unknown[]) : []).map((x) => Number(x)).filter((x) => Number.isInteger(x));
-    if (role !== 'admin' && role !== 'qa_auditor' && branchIds.length === 0) {
+    if (role !== 'admin' && branchIds.length === 0) {
       throw badRequest('Assign at least one branch to this user');
     }
     if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) throw conflict('Username already exists');

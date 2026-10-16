@@ -171,7 +171,7 @@ export function registerBilling(r: Router, db: DatabaseSync) {
 
   r.post('/api/invoices/:id/refund', (ctx) => {
     const actor = ctx.user!;
-    requirePerm(actor, 'billing.write');
+    requirePerm(actor, 'billing.approve_refund');
     const id = intParam(ctx.params.id!, 'id');
     const inv = invoiceRow(db, id);
     if (!inv) throw notFound('Invoice not found');
@@ -202,10 +202,10 @@ export function registerBilling(r: Router, db: DatabaseSync) {
     return json(invoiceDto(db, id, actor), 201);
   });
 
-  // A void is allowed only when nothing is left paid on the invoice, and it needs a second approver.
+  // A void is allowed only when nothing is left paid on the invoice, and only an administrator can do it.
   r.post('/api/invoices/:id/void', (ctx) => {
     const actor = ctx.user!;
-    requirePerm(actor, 'billing.write');
+    requirePerm(actor, 'billing.approve_refund');
     const id = intParam(ctx.params.id!, 'id');
     const inv = invoiceRow(db, id);
     if (!inv) throw notFound('Invoice not found');

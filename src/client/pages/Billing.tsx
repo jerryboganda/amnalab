@@ -121,7 +121,6 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
       () => post(`/api/invoices/${id}/refund`, {
         amountPkr: Number(refund.amount),
         reason: refund.reason,
-        approver: { username: refund.user, password: refund.pass },
       }),
       'Refund recorded',
     );
@@ -134,7 +133,7 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
 
   async function doVoid() {
     const ok = await act.run(
-      () => post(`/api/invoices/${id}/void`, { reason: voidForm.reason, approver: { username: voidForm.user, password: voidForm.pass } }),
+      () => post(`/api/invoices/${id}/void`, { reason: voidForm.reason }),
       'Invoice voided',
     );
     if (ok) setShowVoid(false);
@@ -200,29 +199,25 @@ function InvoiceView({ s, id }: { s: Session; id: number }) {
             </div>
           ) : null}
 
-          {canWrite && inv.paidPkr - inv.refundedPkr > 0 ? (
+          {s.can('billing.approve_refund') && inv.paidPkr - inv.refundedPkr > 0 ? (
             <div className="stack">
               <button onClick={() => setShowRefund(!showRefund)}>{showRefund ? 'Cancel refund' : 'Refund'}</button>
               {showRefund ? (
                 <div className="form-grid">
                   <Field label="Amount (PKR)"><input type="number" min={0} step="0.01" value={refund.amount} onChange={(e) => setRefund({ ...refund, amount: e.target.value })} /></Field>
                   <Field label="Reason"><input value={refund.reason} onChange={(e) => setRefund({ ...refund, reason: e.target.value })} /></Field>
-                  <Field label="Approver username" hint="A different user with refund approval"><input value={refund.user} onChange={(e) => setRefund({ ...refund, user: e.target.value })} /></Field>
-                  <Field label="Approver password"><input type="password" value={refund.pass} onChange={(e) => setRefund({ ...refund, pass: e.target.value })} autoComplete="off" /></Field>
                   <button className="danger" disabled={act.busy} onClick={() => void doRefund()}>Confirm refund</button>
                 </div>
               ) : null}
             </div>
           ) : null}
 
-          {canWrite && inv.status !== 'void' && inv.paidPkr - inv.refundedPkr <= 0 ? (
+          {s.can('billing.approve_refund') && inv.status !== 'void' && inv.paidPkr - inv.refundedPkr <= 0 ? (
             <div className="stack">
               <button onClick={() => setShowVoid(!showVoid)}>{showVoid ? 'Cancel void' : 'Void invoice'}</button>
               {showVoid ? (
                 <div className="form-grid">
                   <Field label="Reason"><input value={voidForm.reason} onChange={(e) => setVoidForm({ ...voidForm, reason: e.target.value })} /></Field>
-                  <Field label="Approver username"><input value={voidForm.user} onChange={(e) => setVoidForm({ ...voidForm, user: e.target.value })} /></Field>
-                  <Field label="Approver password"><input type="password" value={voidForm.pass} onChange={(e) => setVoidForm({ ...voidForm, pass: e.target.value })} autoComplete="off" /></Field>
                   <button className="danger" disabled={act.busy} onClick={() => void doVoid()}>Confirm void</button>
                 </div>
               ) : null}
@@ -291,7 +286,7 @@ function DailyClosing({ s }: { s: Session }) {
           <button className="primary" disabled={!counted || act.busy} onClick={() => void close()}>Close day</button>
         </div>
       ) : (
-        <p className="muted">Only a cashier or branch manager can close the day.</p>
+        <p className="muted">Only an administrator can close the day.</p>
       )}
     </Panel>
   );

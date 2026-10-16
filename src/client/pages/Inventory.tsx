@@ -229,12 +229,6 @@ function Adjust({ s, items, onDone }: { s: Session; items: StockItem[]; onDone: 
         <Field label="Quantity change" hint={f.txnType === 'adjustment' ? 'Use a minus sign to reduce stock' : 'Enter the amount removed from stock'}><input type="number" step="any" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></Field>
         <Field label="Reason (required)"><input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
       </div>
-      {Math.abs(qtyNum) > 0 ? (
-        <div className="form-grid">
-          <Field label="Approver username" hint="Needed only above the approval threshold set in Admin settings. Must be a different user."><input value={f.approverUser} onChange={(e) => setF({ ...f, approverUser: e.target.value })} /></Field>
-          <Field label="Approver password"><input type="password" value={f.approverPass} onChange={(e) => setF({ ...f, approverPass: e.target.value })} autoComplete="off" /></Field>
-        </div>
-      ) : null}
       {act.error ? <Notice kind="error">{act.error}</Notice> : null}
       <button className="primary" disabled={act.busy || !lotId || !qtyNum || f.reason.length < 5} onClick={() => void submit()}>Record</button>
       {s.can('inventory.adjust_approve') ? <p className="muted small">You can approve large adjustments for others, but not your own.</p> : null}

@@ -60,7 +60,7 @@ function paramsOf(db: DatabaseSync, testId: number) {
   });
 }
 
-// Four-eyes rule for reference ranges: the approver must be a different pathologist.
+// Approving a reference range retires the previous one for the same band.
 function approveRange(db: DatabaseSync, actor: AuthUser, rangeId: number): void {
   const row = db
     .prepare('SELECT id, parameter_id, sex, age_min_days, age_max_days, status, created_by FROM reference_ranges WHERE id = ?')
@@ -69,7 +69,6 @@ function approveRange(db: DatabaseSync, actor: AuthUser, rangeId: number): void 
     | undefined;
   if (!row) throw notFound('Range not found');
   if (row.status !== 'pending') throw conflict('Only pending ranges can be approved');
-  if (row.created_by === actor.id) throw conflict('A different pathologist must approve a range change');
   db.exec('BEGIN IMMEDIATE');
   try {
     // The previous approved range for the same band is retired, never deleted, so history is kept.
@@ -307,7 +306,7 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
     return { ok: true };
   });
 
-  // New ranges are always 'pending' until a different pathologist approves them.
+  // New ranges are always 'pending' until an administrator approves them.
   r.post('/api/catalog/parameters/:id/ranges', (ctx) => {
     const actor = ctx.user!;
     requirePerm(actor, 'catalog.write');
@@ -343,7 +342,7 @@ export function registerCatalog(r: Router, db: DatabaseSync) {
     return { ok: true, status: 'approved' };
   });
 
-  // Starter ranges are loaded as usable but unverified; a pathologist confirms them here (recorded with name and time).
+  // Starter ranges are loaded as usable but unverified; the administrator confirms them here (recorded with name and time).
   r.post('/api/catalog/ranges/:id/verify', (ctx) => {
     const actor = ctx.user!;
     requirePerm(actor, 'catalog.approve_ranges');

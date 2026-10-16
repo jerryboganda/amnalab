@@ -91,7 +91,7 @@ export function registerResults(r: Router, db: DatabaseSync) {
     return json(itemView(db, user, itemId));
   });
 
-  // Technical review: a different person from whoever entered the values.
+  // Technical review of the entered values.
   r.post('/api/order-items/:id/review', (ctx) => {
     const user = ctx.user!;
     requirePerm(user, 'results.review');
@@ -104,7 +104,6 @@ export function registerResults(r: Router, db: DatabaseSync) {
     const drafts = rows.filter((x) => x.status === 'draft');
     if (rows.length === 0) throw conflict('No results have been entered yet');
     if (drafts.length === 0) throw conflict('Nothing is waiting for review');
-    if (drafts.some((x) => x.entered_by === user.id)) throw conflict('Technical review must be done by a different person from the one who entered the results');
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare("UPDATE results SET status = 'reviewed', reviewed_by = ?, reviewed_at = ? WHERE order_item_id = ? AND status = 'draft'").run(
@@ -137,9 +136,6 @@ export function registerResults(r: Router, db: DatabaseSync) {
     if (rows.some((x) => x.status === 'draft')) throw conflict('Every result must be technically reviewed before authorization');
     const missing = missingParameters(db, itemId, item.test_id);
     if (missing.length > 0) throw conflict(`Results are missing for: ${missing.join(', ')}`);
-    if (pending.some((x) => x.entered_by === user.id)) {
-      throw conflict('The person who entered a result cannot authorize it');
-    }
     const criticals = pending.filter((x) => x.critical === 1);
     let notifiedTo: string | null = null;
     if (criticals.length > 0) {

@@ -67,7 +67,8 @@ Open the app. The first-time setup asks for the laboratory name, the first branc
 - Copy the `backups/` folder to a second drive or USB stick regularly. A backup on the same disk does not protect against a failed disk.
 - The database uses full-durability writes, so a power cut loses at most the request in progress. **Admin → Backup & health** shows a database check and the free disk space.
 - The audit log, payments, result revisions and stock ledger are append-only at the database level.
-- Results follow four-eyes rules: whoever enters a result cannot review or authorize it. Discounts, refunds, voids and large stock adjustments need a second person's password.
+- There are two kinds of user. The **administrator** can do everything: results (enter, review, authorize, amend), reference ranges, catalog, inventory, refunds, voids, closing the cash day, users, template and backups. **Reception** registers patients, takes and receives samples, creates orders, issues invoices, collects payments and sends reports; it cannot enter results, refund, void, close the day or open the admin screens. A discount by reception needs the administrator to type their username and password.
+- The administrator creates reception users under **Admin, Users**. Results, refunds and approvals by the administrator are all recorded in the audit log.
 
 ## Layout
 

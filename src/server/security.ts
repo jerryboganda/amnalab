@@ -4,17 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { config } from './config.ts';
 import { forbidden } from './http.ts';
 
-export const ROLES = [
-  'admin',
-  'branch_manager',
-  'pathologist',
-  'technician',
-  'reception',
-  'collector',
-  'cashier',
-  'inventory',
-  'qa_auditor',
-] as const;
+export const ROLES = ['admin', 'reception'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const PERMISSIONS = [
@@ -52,34 +42,13 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 const ALL: readonly Permission[] = PERMISSIONS;
 
+// Two kinds of user. The administrator can do everything. Reception registers patients, takes samples,
+// raises orders, issues invoices and collects payments; it cannot enter results, refund, void or close the day.
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   admin: ALL,
-  branch_manager: [
-    'patients.read', 'patients.write', 'catalog.read', 'orders.write', 'specimens.write',
-    'results.review', 'reports.read', 'reports.template', 'reports.send',
-    'billing.read', 'billing.write', 'billing.discount_override', 'billing.approve_refund', 'billing.close',
-    'inventory.read', 'inventory.write', 'inventory.adjust_approve',
-    'notifications.read', 'notifications.write', 'admin.audit', 'dashboard.read',
-  ],
-  pathologist: [
-    'patients.read', 'catalog.read', 'catalog.approve_ranges', 'results.enter', 'results.review',
-    'results.authorize', 'results.amend', 'reports.read', 'reports.template', 'reports.send',
-    'notifications.read', 'dashboard.read',
-  ],
-  technician: [
-    'patients.read', 'catalog.read', 'specimens.write', 'results.enter', 'results.review',
-    'reports.read', 'dashboard.read',
-  ],
   reception: [
-    'patients.read', 'patients.write', 'orders.write', 'reports.read', 'reports.send',
+    'patients.read', 'patients.write', 'orders.write', 'specimens.write', 'reports.read', 'reports.send',
     'billing.read', 'billing.write', 'notifications.read', 'notifications.write', 'dashboard.read',
-  ],
-  collector: ['patients.read', 'orders.write', 'specimens.write', 'dashboard.read'],
-  cashier: ['patients.read', 'billing.read', 'billing.write', 'billing.close', 'dashboard.read'],
-  inventory: ['inventory.read', 'inventory.write', 'dashboard.read'],
-  qa_auditor: [
-    'patients.read', 'catalog.read', 'reports.read', 'billing.read', 'inventory.read',
-    'admin.audit', 'notifications.read', 'dashboard.read',
   ],
 };
 
@@ -178,7 +147,7 @@ export function loadUser(db: DatabaseSync, userId: number): AuthUser | null {
   if (!row || row.is_active !== 1) return null;
   const role = row.role as Role;
   const branchIds: number[] | 'all' =
-    role === 'admin' || role === 'qa_auditor'
+    role === 'admin'
       ? 'all'
       : (db.prepare('SELECT branch_id FROM user_branches WHERE user_id = ?').all(userId) as Array<{ branch_id: number }>).map(
           (r) => r.branch_id,

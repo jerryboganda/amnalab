@@ -84,7 +84,7 @@ function TestList({ s }: { s: Session }) {
     const text = await file.text();
     try {
       const preview = await post('/api/catalog/import', { csv: text, dryRun: true });
-      if (!window.confirm(`The file has ${preview.rows} rows. Import now? New ranges wait for pathologist approval.`)) return;
+      if (!window.confirm(`The file has ${preview.rows} rows. Import now? New ranges wait for approval.`)) return;
       const out = await post('/api/catalog/import', { csv: text });
       setCsvMsg(`Imported ${out.rows} rows. ${out.testsCreated} new tests. Ranges need approval.`);
       load();
@@ -331,7 +331,7 @@ function ParamBlock({
       note: range.note || undefined,
       ageMinDays: Number(range.ageMin),
       ageMaxDays: Number(range.ageMax),
-    }), 'Range proposed. A different pathologist must approve it.');
+    }), 'Range proposed. Press Approve to put it into use.');
     if (ok) setRange({ sex: 'A', low: '', high: '', text: '', note: '', ageMin: '0', ageMax: '36500' });
     onChanged();
   }
@@ -367,10 +367,8 @@ function ParamBlock({
           <span key="n" className="small">{r.note ?? ''} {r.approved_by ? '' : r.status === 'approved' ? '(starter, unverified)' : ''}</span>,
           r.status === 'approved' && !r.approved_by && canApprove ? (
             <button key="v" disabled={busy} onClick={() => void verify(r.id)}>Verify</button>
-          ) : r.status === 'pending' && canApprove && r.created_by !== userId ? (
+          ) : r.status === 'pending' && canApprove ? (
             <button key="a" disabled={busy} onClick={() => void approve(r.id)}>Approve</button>
-          ) : r.status === 'pending' && r.created_by === userId ? (
-            <span key="a" className="muted small">awaiting another pathologist</span>
           ) : null,
         ])}
         empty="No ranges yet"

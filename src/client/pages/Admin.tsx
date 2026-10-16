@@ -7,14 +7,7 @@ type Section = 'users' | 'branches' | 'template' | 'settings' | 'audit' | 'ops';
 
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Administrator',
-  branch_manager: 'Branch manager',
-  pathologist: 'Pathologist / verifier',
-  technician: 'Lab technician',
   reception: 'Reception',
-  collector: 'Collection staff',
-  cashier: 'Cashier',
-  inventory: 'Inventory officer',
-  qa_auditor: 'QA / auditor (read only)',
 };
 
 export function Admin({ s }: { s: Session }) {
@@ -155,7 +148,7 @@ function Users({ s }: { s: Session }) {
             <span key="a" className="row-actions">
               <button disabled={u.id === s.me.id} onClick={() => void toggle(u)}>{u.isActive ? 'Disable' : 'Enable'}</button>
               <button onClick={() => void reset(u)}>Reset password</button>
-              {['pathologist', 'admin', 'branch_manager'].includes(u.role) ? (
+              {u.role === 'admin' ? (
                 <>
                   <button onClick={() => void credentials(u)}>{u.qualifications ? 'Edit qualifications' : 'Qualifications'}</button>
                   <label className="button-like">
@@ -345,7 +338,7 @@ function Template({ s }: { s: Session }) {
         </Field>
 
         <h3>Signatures</h3>
-        <p className="muted small">The Lab Incharge prints on the left of every report. The pathologist who authorized the results prints on the right with the signature and qualifications set under Users.</p>
+        <p className="muted small">The Lab Incharge prints on the left of every report. The administrator who authorized the results prints on the right as Consultant Pathologist, with the signature and qualifications set under Users.</p>
         <div className="form-grid">
           <Field label="Lab Incharge name"><input value={f.inchargeName} onChange={set('inchargeName')} placeholder="M. Ishaq Bhatti" /></Field>
           <Field label="Lab Incharge qualification / title"><input value={f.inchargeTitle} onChange={set('inchargeTitle')} placeholder="M.A. (Pb)" /></Field>

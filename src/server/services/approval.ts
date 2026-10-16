@@ -3,14 +3,16 @@ import { verifyPassword } from '../security.ts';
 import { loadUser, type AuthUser, type Permission } from '../security.ts';
 import { conflict, forbidden, badRequest } from '../http.ts';
 
-// Four-eyes check for high-risk actions. The approver must be a different, active user
-// who holds the permission and re-enters their own password. Nothing is stored about the password.
+// Approval for high-risk actions. A user who already holds the permission (the administrator) approves their own
+// action. Anyone else (reception) must have an administrator type their own username and password; nothing is
+// stored about the password.
 export function verifyApprover(
   db: DatabaseSync,
   requester: AuthUser,
   creds: { username?: unknown; password?: unknown } | undefined,
   perm: Permission,
 ): AuthUser {
+  if (requester.perms.has(perm)) return requester;
   if (!creds || typeof creds.username !== 'string' || typeof creds.password !== 'string') {
     throw badRequest('An approver username and password are required for this action');
   }
