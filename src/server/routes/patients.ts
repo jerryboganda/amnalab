@@ -187,7 +187,8 @@ export function registerPatients(r: Router, db: DatabaseSync) {
     // Previous investigations: this laboratory's orders for the patient, with authorized results only.
     const orders = db
       .prepare(
-        `SELECT o.id, o.order_no, o.created_at, o.status, o.priority, b.code AS branch_code
+        `SELECT o.id, o.order_no, o.created_at, o.status, o.priority, b.code AS branch_code,
+                (SELECT r.id FROM reports r WHERE r.order_id = o.id AND r.status = 'final' ORDER BY r.version DESC LIMIT 1) AS report_id
          FROM orders o JOIN branches b ON b.id = o.branch_id WHERE o.patient_id = ? ORDER BY o.id DESC LIMIT 50`,
       )
       .all(id) as Array<Record<string, any>>;

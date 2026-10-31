@@ -134,6 +134,9 @@ input[type='file'] { padding: 0.3rem; }
 .table th, .table td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table th { color: var(--muted); font-weight: 600; font-size: 0.82rem; }
 .table td .row-actions { flex-wrap: wrap; }
+.worklist-patient-row { background: var(--bg); }
+.worklist-detail { background: var(--panel); }
+.worklist-detail td:nth-child(4) { padding-left: 1.25rem; }
 .results td { padding-top: 0.6rem; }
 .range-cell { min-width: 180px; }
 

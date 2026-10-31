@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { fileToDataUrl, get, post } from '../api.ts';
-import { Badge, Field, Notice, Panel, RangeBar, Table, useAction } from '../ui.tsx';
+import { Badge, Field, Notice, Panel, RangeBar, useAction } from '../ui.tsx';
 import type { Session } from '../App.tsx';
 
 interface WorkItem {
@@ -55,6 +55,15 @@ interface ItemView {
   specimen: { accession: string; status: string; type: string };
   parameters: ParamView[];
   attachments: Array<{ id: number; filename: string; mime: string; size: number }>;
+  report: { id: number; reportNo: string; version: number } | null;
+}
+
+interface SaveResult extends ItemView {
+  orderCompleted: boolean;
+  report: { id: number; reportNo: string; version: number } | null;
+  reportError?: string | null;
+  missing: string[];
+  dispatch?: Array<{ channel: string; status: string }>;
 }
 
 const FLAG_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral'> = { N: 'ok', L: 'warn', H: 'warn', LL: 'danger', HH: 'danger' };
@@ -67,6 +76,7 @@ export function Worklist({ s }: { s: Session }) {
 
 function List({ s }: { s: Session }) {
   const [rows, setRows] = useState<WorkItem[]>([]);
+  const [expandedPatients, setExpandedPatients] = useState<Set<string>>(() => new Set());
   const [priority, setPriority] = useState('');
   const [dept, setDept] = useState('');
   const [departments, setDepartments] = useState<Array<{ id: number; name: string }>>([]);
@@ -86,6 +96,23 @@ function List({ s }: { s: Session }) {
       })
       .catch((e: Error) => setError(e.message));
   }, [s.branchId, priority, dept]);
+
+  const groups = new Map<string, WorkItem[]>();
+  for (const row of rows) {
+    const patientRows = groups.get(row.mrn);
+    if (patientRows) patientRows.push(row);
+    else groups.set(row.mrn, [row]);
+  }
+  const dueText = (due: string | null) =>
+    due ? new Date(due).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', dateStyle: 'short', timeStyle: 'short' }) : '-';
+  const togglePatient = (patientMrn: string) => {
+    setExpandedPatients((current) => {
+      const next = new Set(current);
+      if (next.has(patientMrn)) next.delete(patientMrn);
+      else next.add(patientMrn);
+      return next;
+    });
+  };
 
   return (
     <>
@@ -108,20 +135,65 @@ function List({ s }: { s: Session }) {
       </div>
       {error ? <Notice kind="error">{error}</Notice> : null}
       <Panel>
-        <Table
-          head={['Priority', 'Accession', 'Patient', 'Test', 'Department', 'Due', 'Progress', '']}
-          rows={rows.map((w) => [
-            <Badge key="p" tone={w.priority === 'stat' ? 'danger' : w.priority === 'urgent' ? 'warn' : 'neutral'}>{w.priority}</Badge>,
-            <code key="a">{w.accession_no}</code>,
-            `${w.patient_name} (${w.mrn})`,
-            w.test_name,
-            w.department_name,
-            w.tat_due_at ? new Date(w.tat_due_at).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', dateStyle: 'short', timeStyle: 'short' }) : '-',
-            `${w.authorized_count} / ${w.parameter_count}`,
-            <a key="e" href={`#/worklist/${w.order_item_id}`}>Open</a>,
-          ])}
-          empty="Nothing waiting. Received specimens appear here."
-        />
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>{['Priority', 'Accession', 'Patient', 'Test', 'Department', 'Due', 'Progress', ''].map((head) => <th key={head}>{head}</th>)}</tr>
+            </thead>
+            {groups.size === 0 ? (
+              <tbody><tr><td colSpan={8} className="muted">Nothing waiting. Received specimens appear here.</td></tr></tbody>
+            ) : Array.from(groups, ([patientMrn, items]) => {
+              const priorityRank: Record<string, number> = { stat: 0, urgent: 1, routine: 2 };
+              const topPriority = items.reduce((best, item) =>
+                (priorityRank[item.priority] ?? 3) < (priorityRank[best] ?? 3) ? item.priority : best, items[0]!.priority);
+              const accessions = [...new Set(items.map((item) => item.accession_no))];
+              const departments = [...new Set(items.map((item) => item.department_name))];
+              const earliestDue = items.map((item) => item.tat_due_at).filter((due): due is string => due != null).sort()[0] ?? null;
+              const authorized = items.reduce((total, item) => total + item.authorized_count, 0);
+              const parameters = items.reduce((total, item) => total + item.parameter_count, 0);
+              const multiple = items.length > 1;
+              const expanded = expandedPatients.has(patientMrn);
+              return (
+                <Fragment key={patientMrn}>
+                  <tbody>
+                    <tr className="worklist-patient-row">
+                      <td><Badge tone={topPriority === 'stat' ? 'danger' : topPriority === 'urgent' ? 'warn' : 'neutral'}>{topPriority}</Badge></td>
+                      <td><code>{accessions.length === 1 ? accessions[0] : `${accessions.length} accessions`}</code></td>
+                      <td>{items[0]!.patient_name} ({items[0]!.mrn})</td>
+                      <td>{multiple ? `${items.length} tests` : items[0]!.test_name}</td>
+                      <td>{departments.length === 1 ? departments[0] : `${departments.length} departments`}</td>
+                      <td>{dueText(multiple ? earliestDue : items[0]!.tat_due_at)}</td>
+                      <td>{authorized} / {parameters}</td>
+                      <td>
+                        {multiple ? (
+                          <button type="button" className="link" aria-expanded={expanded} aria-controls={`worklist-items-${patientMrn}`} aria-label={`${expanded ? 'Hide' : 'Show'} tests for ${items[0]!.patient_name}`} onClick={() => togglePatient(patientMrn)}>
+                            {expanded ? 'Hide tests' : 'Show tests'}
+                          </button>
+                        ) : <a href={`#/worklist/${items[0]!.order_item_id}`}>Open</a>}
+                      </td>
+                    </tr>
+                  </tbody>
+                  {multiple ? (
+                    <tbody id={`worklist-items-${patientMrn}`} hidden={!expanded}>
+                      {items.map((item) => (
+                        <tr key={item.order_item_id} className="worklist-detail">
+                          <td><Badge tone={item.priority === 'stat' ? 'danger' : item.priority === 'urgent' ? 'warn' : 'neutral'}>{item.priority}</Badge></td>
+                          <td><code>{item.accession_no}</code></td>
+                          <td />
+                          <td><span aria-hidden="true">↳ </span>{item.test_name}</td>
+                          <td>{item.department_name}</td>
+                          <td>{dueText(item.tat_due_at)}</td>
+                          <td>{item.authorized_count} / {item.parameter_count}</td>
+                          <td><a href={`#/worklist/${item.order_item_id}`}>Open</a></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </table>
+        </div>
       </Panel>
     </>
   );
@@ -130,13 +202,14 @@ function List({ s }: { s: Session }) {
 function Entry({ s, itemId }: { s: Session; itemId: number }) {
   const [item, setItem] = useState<ItemView | null>(null);
   const [values, setValues] = useState<Record<number, { num: string; text: string; comment: string }>>({});
-  const [notify, setNotify] = useState('');
+  const [issuedReport, setIssuedReport] = useState<SaveResult['report']>(null);
   const [amend, setAmend] = useState<{ resultId: number; value: string; reason: string; param: string } | null>(null);
   const act = useAction();
 
   const load = async () => {
     const view = await get<ItemView>(`/api/order-items/${itemId}`);
     setItem(view);
+    if (view.report) setIssuedReport(view.report);
     const next: Record<number, { num: string; text: string; comment: string }> = {};
     for (const p of view.parameters) {
       next[p.id] = {
@@ -155,11 +228,7 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
 
   if (!item) return act.error ? <Notice kind="error">{act.error}</Notice> : <p className="muted">Loading...</p>;
   const specimenReady = item.specimen.status === 'received' || item.specimen.status === 'processing';
-  const criticals = item.parameters.filter((p) => p.result?.critical === 1 && p.result.status !== 'authorized' && p.result.status !== 'cancelled');
-  const allReviewed = item.parameters.filter((p) => p.result && p.result.status !== 'cancelled').every((p) => p.result?.status === 'reviewed' || p.result?.status === 'authorized');
   const anyEntered = item.parameters.some((p) => p.result);
-  // Reviewers must be a different person from whoever entered the draft values.
-  const draftsByOthers = item.parameters.some((p) => p.result?.status === 'draft' && p.result.entered_by !== s.me.id);
 
   async function saveEntries() {
     const body = {
@@ -180,34 +249,15 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         })
         .filter((x) => ('valueNumeric' in x ? x.valueNumeric !== null : (x.valueText ?? '') !== '')),
     };
-    if (body.values.length === 0) {
+    const completeDraft = item!.status !== 'completed' && item!.parameters.every((p) => p.result && p.result.status !== 'cancelled');
+    if (body.values.length === 0 && !completeDraft) {
       act.setOk('Nothing changed');
       return;
     }
-    await act.run(() => post(`/api/order-items/${itemId}/results`, body), 'Results saved');
-    await load();
-  }
-
-  async function review() {
-    await act.run(() => post(`/api/order-items/${itemId}/review`), 'Technically reviewed');
-    await load();
-  }
-
-  async function authorize() {
-    if (criticals.length > 0 && notify.trim().length < 2) {
-      act.setError('Record who the critical value was communicated to (name and time) before authorizing');
-      return;
-    }
-    const out = await act.run(
-      () => post<{ orderCompleted: boolean; report: { reportNo: string; version: number } | null; reportError: string | null }>(`/api/order-items/${itemId}/authorize`, {
-        criticalNotifiedTo: criticals.length ? notify : undefined,
-      }),
-      'Authorized',
-    );
-    if (out?.orderCompleted) {
-      if (out.reportError) act.setError(`Authorized, but the report could not be generated: ${out.reportError}. Use Re-issue on the order.`);
-      else act.setOk(out.report ? `Authorized. Report ${out.report.reportNo} v${out.report.version} is ready.` : 'Authorized. The order is complete.');
-    }
+    const out = await act.run(() => post<SaveResult>(`/api/order-items/${itemId}/results`, body), 'Results saved');
+    if (out?.report) setIssuedReport(out.report);
+    if (out?.reportError) act.setError(`Results saved, but report generation failed: ${out.reportError}`);
+    else if (out?.report) act.setOk(`All order results saved. Report ${out.report.reportNo} v${out.report.version} is ready.`);
     await load();
   }
 
@@ -333,29 +383,9 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         {item.status !== 'completed' ? (
           <div className="row-actions">
             {s.can('results.enter') && specimenReady ? <button className="primary" onClick={() => void saveEntries()} disabled={act.busy}>Save results</button> : null}
-            {s.can('results.review') && draftsByOthers ? <button onClick={() => void review()} disabled={act.busy}>Technical review</button> : null}
           </div>
         ) : null}
-
-        {s.can('results.authorize') && item.status !== 'completed' && anyEntered ? (
-          <div className="authorize-box">
-            <h3>Authorize</h3>
-            {criticals.length > 0 ? (
-              <>
-                <Notice kind="warn">
-                  Critical value: {criticals.map((c) => c.name).join(', ')}. Record who it was communicated to before authorizing.
-                </Notice>
-                <Field label="Communicated to (name, designation, time)">
-                  <input value={notify} onChange={(e) => setNotify(e.target.value)} placeholder="e.g. Dr. Ali (ward), 14:20" />
-                </Field>
-              </>
-            ) : null}
-            <button className="primary" disabled={!allReviewed || act.busy} onClick={() => void authorize()}>
-              Authorize and release
-            </button>
-            {!allReviewed ? <p className="muted small">Each result must be technically reviewed by someone other than the person who entered it.</p> : null}
-          </div>
-        ) : null}
+        {issuedReport && s.can('reports.read') ? <div className="row-actions"><a className="button-like" href={`/api/reports/${issuedReport.id}/pdf`} target="_blank" rel="noopener">Download report {issuedReport.reportNo}</a></div> : null}
       </Panel>
 
       {amend ? (

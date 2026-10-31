@@ -256,7 +256,7 @@ function RegisterForm({ s, onCreated }: { s: Session; onCreated: (id: number) =>
 
 interface Detail {
   patient: PatientRow & { address: string | null; allergies: string | null; practitionerName: string | null; practitionerId: number | null; dob: string | null };
-  history: Array<{ id: number; order_no: string; created_at: string; status: string; priority: string; tests: Array<{ name: string; status: string }> }>;
+  history: Array<{ id: number; order_no: string; created_at: string; status: string; priority: string; report_id: number | null; tests: Array<{ name: string; status: string }> }>;
 }
 
 function PatientDetail({
@@ -337,12 +337,13 @@ function PatientDetail({
       <Trends id={id} />
       <Panel title="Previous investigations">
         <Table
-          head={['Order', 'Date', 'Tests', 'Status']}
+          head={['Order', 'Date', 'Tests', 'Status', 'Report']}
           rows={data.history.map((h) => [
             <a key="o" href={`#/orders/${h.id}`}><code>{h.order_no}</code></a>,
             dateOnly(h.created_at),
             h.tests.map((t) => t.name).join(', '),
             <Badge key="s" tone={h.status === 'completed' ? 'ok' : 'info'}>{h.status.replace('_', ' ')}</Badge>,
+            h.report_id && s.can('reports.read') ? <a key="r" href={`/api/reports/${h.report_id}/pdf`} target="_blank" rel="noopener">Download PDF</a> : <span className="muted small">{h.status === 'completed' ? 'No report' : 'Pending'}</span>,
           ])}
           empty="No investigations yet"
         />

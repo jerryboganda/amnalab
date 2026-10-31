@@ -19,6 +19,7 @@ import {
 } from '../services/results-core.ts';
 import { selectRange } from '../services/flags.ts';
 import { generateReportForOrder } from '../services/reports.ts';
+import { queueReport, type Channel } from '../services/notify.ts';
 
 function itemView(db: DatabaseSync, user: AuthUser, itemId: number) {
   const ctx = loadItem(db, user, itemId);
@@ -51,6 +52,7 @@ function itemView(db: DatabaseSync, user: AuthUser, itemId: number) {
   const attachments = db
     .prepare('SELECT id, filename, mime, size, uploaded_at FROM attachments WHERE order_item_id = ? ORDER BY id')
     .all(itemId);
+  const report = db.prepare("SELECT id, report_no AS reportNo, version FROM reports WHERE order_id = ? AND status = 'final' ORDER BY version DESC LIMIT 1").get(ctx.order_id) ?? null;
   return {
     id: ctx.id,
     status: ctx.status,
@@ -63,6 +65,7 @@ function itemView(db: DatabaseSync, user: AuthUser, itemId: number) {
     specimen: { accession: ctx.accession_no, status: ctx.specimen_status, type: ctx.specimen_type },
     parameters: params,
     attachments,
+    report,
   };
 }
 
@@ -76,11 +79,12 @@ export function registerResults(r: Router, db: DatabaseSync) {
   });
 
   // Entry: { values: [{ parameterId, valueNumeric | valueText, comment }] }. Partial saves are allowed.
-  r.post('/api/order-items/:id/results', (ctx) => {
+  r.post('/api/order-items/:id/results', async (ctx) => {
     const user = ctx.user!;
     requirePerm(user, 'results.enter');
     const itemId = intParam(ctx.params.id!, 'id');
-    const values = asObjects(arr(ctx.body, 'values', 200), 'values');
+    const rawValues = (ctx.body as Record<string, unknown>).values;
+    const values = Array.isArray(rawValues) && rawValues.length === 0 ? [] : asObjects(arr(ctx.body, 'values', 200), 'values');
     const entries: Entry[] = values.map((v) => ({
       parameterId: Number(v.parameterId),
       valueNumeric: v.valueNumeric === undefined || v.valueNumeric === null || v.valueNumeric === '' ? null : Number(v.valueNumeric),
@@ -88,7 +92,40 @@ export function registerResults(r: Router, db: DatabaseSync) {
       comment: typeof v.comment === 'string' ? v.comment.slice(0, 300) : null,
     }));
     saveEntries(db, user, itemId, entries);
-    return json(itemView(db, user, itemId));
+    const item = loadItem(db, user, itemId);
+    const missing = missingParameters(db, itemId, item.test_id);
+    if (missing.length > 0) return json({ ...itemView(db, user, itemId), orderCompleted: false, report: null, missing });
+    const at = nowIso();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare("UPDATE results SET status = 'authorized', authorized_by = ?, authorized_at = ? WHERE order_item_id = ? AND status <> 'cancelled'").run(user.id, at, itemId);
+      db.prepare("UPDATE order_items SET status = 'completed', completed_at = ? WHERE id = ?").run(at, itemId);
+      audit(db, { actor: user, branchId: item.branch_id, action: 'result.auto_release', entity: 'order_item', entityId: itemId });
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    const orderDone = await completeOrderIfDone(db, user, item.order_id);
+    let dispatch: Array<{ channel: Channel; status: string }> = [];
+    const reportId = (orderDone.report as { id?: number } | null)?.id;
+    if (reportId) {
+      const consent = db.prepare('SELECT p.consent_email, p.email, p.consent_sms, p.phone, p.consent_whatsapp, p.whatsapp FROM orders o JOIN patients p ON p.id = o.patient_id WHERE o.id = ?').get(item.order_id) as
+        | { consent_email: number; email: string | null; consent_sms: number; phone: string | null; consent_whatsapp: number; whatsapp: string | null }
+        | undefined;
+      const channels: Channel[] = [];
+      if (consent?.consent_email && consent.email?.includes('@')) channels.push('email');
+      if (consent?.consent_sms && consent.phone) channels.push('sms');
+      if (consent?.consent_whatsapp && (consent.whatsapp || consent.phone)) channels.push('whatsapp');
+      dispatch = channels.flatMap((channel) => {
+        try {
+          return [{ channel, status: queueReport(db, user, reportId, channel).status }];
+        } catch {
+          return [];
+        }
+      });
+    }
+    return json({ ...itemView(db, user, itemId), orderCompleted: orderDone.completed, report: orderDone.report, reportError: orderDone.reportError ?? null, dispatch, missing: [] });
   });
 
   // Technical review of the entered values.

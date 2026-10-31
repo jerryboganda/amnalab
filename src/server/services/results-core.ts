@@ -166,7 +166,7 @@ export function saveEntries(db: DatabaseSync, actor: AuthUser, itemId: number, e
     db.prepare("UPDATE order_items SET status = 'processing' WHERE id = ? AND status IN ('received','processing')").run(itemId);
     db.prepare("UPDATE specimens SET status = 'processing' WHERE id = ? AND status = 'received'").run(ctx.specimen_id);
     db.prepare("UPDATE orders SET status = 'in_progress' WHERE id = ? AND status = 'confirmed'").run(ctx.order_id);
-    consumeReagentsForItem(db, ctx.branch_id, itemId, ctx.test_id, actor.id);
+    if (entries.length > 0) consumeReagentsForItem(db, ctx.branch_id, itemId, ctx.test_id, actor.id);
     audit(db, { actor, branchId: ctx.branch_id, action: 'result.enter', entity: 'order_item', entityId: itemId, after: { count: entries.length } });
     db.exec('COMMIT');
   } catch (err) {
