@@ -36,7 +36,7 @@ export function specimenLabelHtml(d: LabelData, autoPrint = true): string {
   .foot{display:flex;align-items:center;gap:1mm;margin-top:.5mm}
   .tests{flex:1;min-width:0;font-size:5.6pt;font-weight:600;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   @media screen{html{background:#eef1f5}body{padding:24px}.label{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.15);border-radius:2mm;transform:scale(2.2);transform-origin:top left}}
-  @media print{@page{size:50mm 25mm;margin:0}}
+  @media print{@page{size:50mm 25mm;margin:0}body,.label{color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style></head><body>
 <div class="label">
   <div class="qr">${d.qrSvg}<div class="br">${esc(d.branchCode)}</div></div>

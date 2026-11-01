@@ -33,16 +33,19 @@ export function registerFonts(): void {
 export const FONT = 'Inter';
 
 // ---- Colours
-export const INK = '#0F172A';
-export const MUTED = '#64748B';
-export const FAINT = '#94A3B8';
-export const LINE = '#E2E8F0';
-export const SOFT = '#F8FAFC';
+// Keep every generated PDF readable when a colour document is printed in grayscale.
+// Very light slate text and rules that look fine on screen nearly disappear on office printers.
+export const INK = '#000000';
+export const MUTED = '#252525';
+export const FAINT = '#333333';
+export const LINE = '#666666';
+export const SOFT = '#F0F0F0';
+export const PRINT_BRAND: Brand = { primary: INK, secondary: INK };
 export const FLAG = {
-  low: { fg: '#1D4ED8', bg: '#DBEAFE', sym: '▼' },
-  high: { fg: '#B45309', bg: '#FEF3C7', sym: '▲' },
-  critical: { fg: '#B91C1C', bg: '#FEE2E2', sym: '◆' },
-  normal: { fg: '#64748B', bg: '#F1F5F9', sym: '●' },
+  low: { fg: INK, bg: '#FFFFFF', sym: '▼' },
+  high: { fg: INK, bg: '#FFFFFF', sym: '▲' },
+  critical: { fg: INK, bg: '#FFFFFF', sym: '◆' },
+  normal: { fg: INK, bg: '#FFFFFF', sym: '●' },
 };
 
 export interface Brand {
@@ -65,7 +68,7 @@ export function FlagChip({ code }: { code: FlagCode }) {
   const s = flagStyle(code);
   const label = code === 'N' ? 'N' : code;
   return (
-    <View style={{ backgroundColor: s.bg, borderRadius: 9999, paddingHorizontal: 5, paddingVertical: 1, alignSelf: 'flex-start' }}>
+    <View style={{ backgroundColor: s.bg, borderWidth: 0.7, borderColor: INK, borderRadius: 9999, paddingHorizontal: 5, paddingVertical: 1, alignSelf: 'flex-start' }}>
       <Text style={{ color: s.fg, fontSize: 7, fontWeight: 700 }}>{`${s.sym} ${label}`}</Text>
     </View>
   );
@@ -160,7 +163,7 @@ const ICONS: Array<{ match: RegExp; color: string; path: string }> = [
 ];
 export function deptStyle(name: string, brand: Brand) {
   const hit = ICONS.find((i) => i.match.test(name))!;
-  return { color: hit.match.source === '.*' ? brand.primary : hit.color, path: hit.path };
+  return { color: INK, path: hit.path };
 }
 
 export function DeptHeader({ name, count, brand }: { name: string; count: number; brand: Brand }) {

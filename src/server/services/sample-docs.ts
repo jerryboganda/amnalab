@@ -103,7 +103,7 @@ export function sampleReport(branch: SampleBranch, brand: Brand, incharge: Signe
         name: 'Dr. Muhammad Jamil',
         qualifications: 'MBBS, M.Phil Pathology (UHS)',
         signatureDataUri: null,
-        note: 'Authorized 09 Oct 2026, 14:18',
+        note: null,
       },
     ],
   };

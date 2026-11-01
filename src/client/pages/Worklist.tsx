@@ -15,8 +15,7 @@ interface WorkItem {
   department_id: number;
   accession_no: string;
   tat_due_at: string | null;
-  parameter_count: number;
-  authorized_count: number;
+  result_count: number;
 }
 
 interface ParamView {
@@ -62,7 +61,6 @@ interface SaveResult extends ItemView {
   orderCompleted: boolean;
   report: { id: number; reportNo: string; version: number } | null;
   reportError?: string | null;
-  missing: string[];
   dispatch?: Array<{ channel: string; status: string }>;
 }
 
@@ -138,7 +136,7 @@ function List({ s }: { s: Session }) {
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr>{['Priority', 'Accession', 'Patient', 'Test', 'Department', 'Due', 'Progress', ''].map((head) => <th key={head}>{head}</th>)}</tr>
+              <tr>{['Priority', 'Accession', 'Patient', 'Test', 'Department', 'Due', 'Results entered', ''].map((head) => <th key={head}>{head}</th>)}</tr>
             </thead>
             {groups.size === 0 ? (
               <tbody><tr><td colSpan={8} className="muted">Nothing waiting. Received specimens appear here.</td></tr></tbody>
@@ -149,8 +147,7 @@ function List({ s }: { s: Session }) {
               const accessions = [...new Set(items.map((item) => item.accession_no))];
               const departments = [...new Set(items.map((item) => item.department_name))];
               const earliestDue = items.map((item) => item.tat_due_at).filter((due): due is string => due != null).sort()[0] ?? null;
-              const authorized = items.reduce((total, item) => total + item.authorized_count, 0);
-              const parameters = items.reduce((total, item) => total + item.parameter_count, 0);
+              const resultsEntered = items.reduce((total, item) => total + item.result_count, 0);
               const multiple = items.length > 1;
               const expanded = expandedPatients.has(patientMrn);
               return (
@@ -163,7 +160,7 @@ function List({ s }: { s: Session }) {
                       <td>{multiple ? `${items.length} tests` : items[0]!.test_name}</td>
                       <td>{departments.length === 1 ? departments[0] : `${departments.length} departments`}</td>
                       <td>{dueText(multiple ? earliestDue : items[0]!.tat_due_at)}</td>
-                      <td>{authorized} / {parameters}</td>
+                      <td>{resultsEntered}</td>
                       <td>
                         {multiple ? (
                           <button type="button" className="link" aria-expanded={expanded} aria-controls={`worklist-items-${patientMrn}`} aria-label={`${expanded ? 'Hide' : 'Show'} tests for ${items[0]!.patient_name}`} onClick={() => togglePatient(patientMrn)}>
@@ -183,7 +180,7 @@ function List({ s }: { s: Session }) {
                           <td><span aria-hidden="true">↳ </span>{item.test_name}</td>
                           <td>{item.department_name}</td>
                           <td>{dueText(item.tat_due_at)}</td>
-                          <td>{item.authorized_count} / {item.parameter_count}</td>
+                          <td>{item.result_count}</td>
                           <td><a href={`#/worklist/${item.order_item_id}`}>Open</a></td>
                         </tr>
                       ))}
@@ -249,7 +246,7 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
         })
         .filter((x) => ('valueNumeric' in x ? x.valueNumeric !== null : (x.valueText ?? '') !== '')),
     };
-    const completeDraft = item!.status !== 'completed' && item!.parameters.every((p) => p.result && p.result.status !== 'cancelled');
+    const completeDraft = item!.status !== 'completed' && item!.parameters.some((p) => p.result && p.result.status !== 'cancelled');
     if (body.values.length === 0 && !completeDraft) {
       act.setOk('Nothing changed');
       return;
@@ -298,6 +295,7 @@ function Entry({ s, itemId }: { s: Session; itemId: number }) {
       {act.ok ? <Notice kind="ok">{act.ok}</Notice> : null}
 
       <Panel title="Results">
+        <p className="muted">Enter only parameters that were performed. Leave unperformed parameters blank; blank values are omitted from the report. Enter at least one result for this test.</p>
         <div className="table-wrap">
         <table className="table results">
           <thead>

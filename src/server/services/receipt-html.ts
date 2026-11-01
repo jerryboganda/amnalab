@@ -49,7 +49,7 @@ export function receiptHtml(d: ReceiptData, autoPrint = true): string {
   .status.void{background:#fff;color:#000;border:2px solid #000}
   .qr{width:30mm;margin:6px auto 0}.qr svg{width:100%;height:auto;display:block}
   @media screen{body{--brand:${esc(d.lab.brand)};background:#fff;margin:16px auto;box-shadow:0 2px 14px rgba(0,0,0,.14);border-radius:4px}html{background:#eef1f5}}
-  @media print{@page{size:80mm auto;margin:0}body{--brand:#000}}
+  @media print{@page{size:80mm auto;margin:0}body{--brand:#000;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}.m,.meta td:first-child{color:#222}}
 </style></head><body>
 <h1>${esc(d.lab.name)}</h1>
 ${d.lab.motto ? `<div class="motto">${esc(d.lab.motto)}</div>` : ''}

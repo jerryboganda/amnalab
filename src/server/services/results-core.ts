@@ -238,10 +238,24 @@ export function itemHasAuthorizedAll(db: DatabaseSync, itemId: number): boolean 
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'authorized' THEN 1 ELSE 0 END) AS authorized
-       FROM results WHERE order_item_id = ? AND status <> 'cancelled'`,
+       FROM results
+       WHERE order_item_id = ? AND status <> 'cancelled'
+         AND (value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)`,
     )
     .get(itemId) as { total: number; authorized: number | null };
   return row.total > 0 && row.authorized === row.total;
+}
+
+export function itemHasResults(db: DatabaseSync, itemId: number): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM results
+       WHERE order_item_id = ? AND status <> 'cancelled'
+         AND (value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)
+       LIMIT 1`,
+    )
+    .get(itemId);
+  return !!row;
 }
 
 // Amends an authorized result: keeps the old value as a revision, recalculates flags, ranges and
@@ -297,17 +311,4 @@ export function amendResult(
     throw err;
   }
   return { version: Number(row.version) + 1 };
-}
-
-// Every active hand-entered parameter must have a result before the test can be authorized.
-export function missingParameters(db: DatabaseSync, itemId: number, testId: number): string[] {
-  const rows = db
-    .prepare(
-      `SELECT tp.name FROM test_parameters tp
-       WHERE tp.test_id = ? AND tp.is_active = 1 AND tp.result_type <> 'calculated'
-         AND NOT EXISTS (SELECT 1 FROM results r WHERE r.order_item_id = ? AND r.parameter_id = tp.id AND r.status <> 'cancelled')
-       ORDER BY tp.display_order`,
-    )
-    .all(testId, itemId) as Array<{ name: string }>;
-  return rows.map((r) => r.name);
 }

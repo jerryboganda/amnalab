@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError } from './api.ts';
 
 export function Notice({ kind = 'info', children }: { kind?: 'info' | 'ok' | 'error' | 'warn'; children: ReactNode }) {
@@ -70,8 +70,7 @@ function AskDialog({ opts, onDone }: { opts: AskOptions; onDone: (v: string | nu
     onDone(v);
   };
   useEffect(() => ref.current?.showModal(), []);
-  function submit(e: FormEvent) {
-    e.preventDefault();
+  function submit() {
     const v = value.trim();
     const min = opts.minLength ?? 1;
     if (!opts.optional && v.length < min) {
@@ -82,7 +81,7 @@ function AskDialog({ opts, onDone }: { opts: AskOptions; onDone: (v: string | nu
   }
   return (
     <dialog ref={ref} className="dialog" onClose={() => finish(null)}>
-      <form onSubmit={submit}>
+      <div>
         <h2>{opts.title}</h2>
         <Field label={opts.label} hint={opts.hint}>
           <input
@@ -93,14 +92,20 @@ function AskDialog({ opts, onDone }: { opts: AskOptions; onDone: (v: string | nu
             minLength={opts.minLength}
             value={value}
             onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+              }
+            }}
           />
         </Field>
         {problem ? <Notice kind="error">{problem}</Notice> : null}
         <div className="row">
-          <button type="submit" className="primary">{opts.submit ?? 'OK'}</button>
+          <button type="button" className="primary" onClick={submit}>{opts.submit ?? 'OK'}</button>
           <button type="button" onClick={() => finish(null)}>Cancel</button>
         </div>
-      </form>
+      </div>
     </dialog>
   );
 }

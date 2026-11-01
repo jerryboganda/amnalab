@@ -9,13 +9,13 @@ import {
   activeParams,
   approvedRanges,
   itemHasAuthorizedAll,
+  itemHasResults,
   loadItem,
   patientAgeSex,
   rangeLabel,
   saveEntries,
   type Entry,
   amendResult,
-  missingParameters,
 } from '../services/results-core.ts';
 import { selectRange } from '../services/flags.ts';
 import { generateReportForOrder } from '../services/reports.ts';
@@ -28,7 +28,8 @@ function itemView(db: DatabaseSync, user: AuthUser, itemId: number) {
     const result = db
       .prepare(
         `SELECT id, value_numeric, value_text, flag, status, version, critical, critical_notified_to, comment, entered_by, reviewed_by, authorized_by, cancel_reason
-         FROM results WHERE order_item_id = ? AND parameter_id = ?`,
+         FROM results WHERE order_item_id = ? AND parameter_id = ?
+           AND (status = 'cancelled' OR value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)`,
       )
       .get(itemId, p.id) as Record<string, any> | undefined;
     const range = selectRange(approvedRanges(db, p.id), sex, ageDays);
@@ -93,12 +94,15 @@ export function registerResults(r: Router, db: DatabaseSync) {
     }));
     saveEntries(db, user, itemId, entries);
     const item = loadItem(db, user, itemId);
-    const missing = missingParameters(db, itemId, item.test_id);
-    if (missing.length > 0) return json({ ...itemView(db, user, itemId), orderCompleted: false, report: null, missing });
+    if (!itemHasResults(db, itemId)) throw conflict('Enter at least one performed result. Leave unperformed parameters blank.');
     const at = nowIso();
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.prepare("UPDATE results SET status = 'authorized', authorized_by = ?, authorized_at = ? WHERE order_item_id = ? AND status <> 'cancelled'").run(user.id, at, itemId);
+      db.prepare(
+        `UPDATE results SET status = 'authorized', authorized_by = ?, authorized_at = ?
+         WHERE order_item_id = ? AND status <> 'cancelled'
+           AND (value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)`,
+      ).run(user.id, at, itemId);
       db.prepare("UPDATE order_items SET status = 'completed', completed_at = ? WHERE id = ?").run(at, itemId);
       audit(db, { actor: user, branchId: item.branch_id, action: 'result.auto_release', entity: 'order_item', entityId: itemId });
       db.exec('COMMIT');
@@ -125,7 +129,7 @@ export function registerResults(r: Router, db: DatabaseSync) {
         }
       });
     }
-    return json({ ...itemView(db, user, itemId), orderCompleted: orderDone.completed, report: orderDone.report, reportError: orderDone.reportError ?? null, dispatch, missing: [] });
+    return json({ ...itemView(db, user, itemId), orderCompleted: orderDone.completed, report: orderDone.report, reportError: orderDone.reportError ?? null, dispatch });
   });
 
   // Technical review of the entered values.
@@ -135,7 +139,11 @@ export function registerResults(r: Router, db: DatabaseSync) {
     const itemId = intParam(ctx.params.id!, 'id');
     loadItem(db, user, itemId);
     const rows = db
-      .prepare("SELECT id, status, entered_by FROM results WHERE order_item_id = ? AND status <> 'cancelled'")
+      .prepare(
+        `SELECT id, status, entered_by FROM results
+         WHERE order_item_id = ? AND status <> 'cancelled'
+           AND (value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)`,
+      )
       .all(itemId) as Array<{ id: number; status: string; entered_by: number | null }>;
     // Only draft rows are reviewed; already authorized siblings (after an amendment) stay as they are.
     const drafts = rows.filter((x) => x.status === 'draft');
@@ -143,7 +151,11 @@ export function registerResults(r: Router, db: DatabaseSync) {
     if (drafts.length === 0) throw conflict('Nothing is waiting for review');
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.prepare("UPDATE results SET status = 'reviewed', reviewed_by = ?, reviewed_at = ? WHERE order_item_id = ? AND status = 'draft'").run(
+      db.prepare(
+        `UPDATE results SET status = 'reviewed', reviewed_by = ?, reviewed_at = ?
+         WHERE order_item_id = ? AND status = 'draft'
+           AND (value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)`,
+      ).run(
         user.id,
         nowIso(),
         itemId,
@@ -165,14 +177,14 @@ export function registerResults(r: Router, db: DatabaseSync) {
     const item = loadItem(db, user, itemId);
     const rows = db
       .prepare(
-        `SELECT id, status, entered_by, reviewed_by, critical FROM results WHERE order_item_id = ? AND status <> 'cancelled'`,
+        `SELECT id, status, entered_by, reviewed_by, critical FROM results
+         WHERE order_item_id = ? AND status <> 'cancelled'
+           AND (value_numeric IS NOT NULL OR NULLIF(TRIM(value_text), '') IS NOT NULL)`,
       )
       .all(itemId) as Array<{ id: number; status: string; entered_by: number | null; reviewed_by: number | null; critical: number }>;
     const pending = rows.filter((x) => x.status === 'reviewed');
     if (rows.length === 0 || pending.length === 0) throw conflict('No reviewed results to authorize');
     if (rows.some((x) => x.status === 'draft')) throw conflict('Every result must be technically reviewed before authorization');
-    const missing = missingParameters(db, itemId, item.test_id);
-    if (missing.length > 0) throw conflict(`Results are missing for: ${missing.join(', ')}`);
     const criticals = pending.filter((x) => x.critical === 1);
     let notifiedTo: string | null = null;
     if (criticals.length > 0) {
@@ -269,7 +281,7 @@ export function registerResults(r: Router, db: DatabaseSync) {
 
 }
 
-// When every test on an order is authorized, the order completes and a report version is issued.
+// When every ordered test is completed or cancelled and all entered results are authorized, issue a report.
 export async function completeOrderIfDone(
   db: DatabaseSync,
   actor: AuthUser,

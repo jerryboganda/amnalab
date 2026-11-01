@@ -1,6 +1,6 @@
 {
   "name": "amna-lab-lms",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Ultralight laboratory management system for one PC (Node + SQLite + React)",
   "type": "module",

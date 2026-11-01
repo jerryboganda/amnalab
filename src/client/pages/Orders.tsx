@@ -468,7 +468,7 @@ function OrderDetail({ s, id }: { s: Session; id: number }) {
                 ) : null}
               </span>,
             ])}
-            empty="No report yet. Save complete results for every test to generate the report."
+            empty="No report yet. Save results for performed tests; blank parameters are omitted from the report. Cancel any entire ordered test that was not performed."
           />
           {s.can('results.authorize') && order.status === 'completed' ? (
             <button onClick={() => void reissue()}>Re-issue report (new version)</button>

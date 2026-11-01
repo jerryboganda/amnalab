@@ -13,9 +13,9 @@ import {
   LabFooter,
   LabHeader,
   MUTED,
+  PRINT_BRAND,
   RangeBar,
   SOFT,
-  SignatureCard,
   Sparkline,
   VerifyQr,
   flagStyle,
@@ -72,6 +72,34 @@ const GENDER: Record<string, string> = { M: 'Male', F: 'Female', O: 'Other' };
 const MM = 2.8346;
 // Column widths in points; the content width is 595 - 2 x 28 = 539.
 const C = { param: 146, result: 56, unit: 58, ref: 80, bar: 92, trend: 62, flag: 45 } as const;
+
+function SignerStamp({
+  name,
+  qualifications,
+  title,
+  align,
+}: {
+  name: string;
+  qualifications: string;
+  title: string;
+  align: 'left' | 'right';
+}) {
+  return (
+    <View style={{ width: 210, alignItems: align === 'left' ? 'flex-start' : 'flex-end' }}>
+      <Text style={{ fontSize: 12, fontWeight: 800, color: INK, textAlign: align }}>{name}</Text>
+      <Text style={{ fontSize: 9, color: INK, textAlign: align, marginTop: 1 }}>{qualifications}</Text>
+      <Text style={{ fontSize: 9, fontWeight: 800, color: INK, letterSpacing: 1.2, textAlign: align, marginTop: 2 }}>{title.toUpperCase()}</Text>
+    </View>
+  );
+}
+
+function LabInchargeStamp() {
+  return <SignerStamp name="M. Ishaq Bhatti" qualifications="M.A. (LLB)" title="Lab Incharge" align="left" />;
+}
+
+function PathologistStamp() {
+  return <SignerStamp name="Dr. Muhammad Jamil" qualifications="MBBS, M.Phil Pathology (UHS)" title="Consultant Pathologist" align="right" />;
+}
 
 function HeadCell({ w, children, align = 'left' }: { w: number; children: string; align?: 'left' | 'right' | 'center' }) {
   return <Text style={{ width: w, fontSize: 6.3, fontWeight: 700, color: FAINT, letterSpacing: 0.8, textAlign: align, textTransform: 'uppercase' }}>{children}</Text>;
@@ -208,17 +236,17 @@ function AbnormalSummary({ d }: { d: ReportData }) {
   items.sort((a, z) => Number(z.critical) - Number(a.critical));
   if (items.length === 0) {
     return (
-      <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 5, paddingVertical: 4, paddingHorizontal: 8 }}>
-        <Text style={{ fontSize: 8, fontWeight: 700, color: '#047857' }}>● All reported values are within their reference ranges.</Text>
+    <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderWidth: 0.8, borderColor: INK, borderRadius: 5, paddingVertical: 4, paddingHorizontal: 8 }}>
+        <Text style={{ fontSize: 8, fontWeight: 700, color: INK }}>● All reported values are within their reference ranges.</Text>
       </View>
     );
   }
   const crit = items.filter((i) => i.critical).length;
   const shown = items.slice(0, 20);
   return (
-    <View wrap={false} style={{ marginTop: 6, borderWidth: 0.8, borderColor: '#FECACA', backgroundColor: '#FFF7F7', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 6 }}>
+    <View wrap={false} style={{ marginTop: 6, borderWidth: 1, borderColor: INK, backgroundColor: '#F0F0F0', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 6 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-        <Text style={{ fontSize: 8.4, fontWeight: 800, color: '#B91C1C', letterSpacing: 0.6 }}>ATTENTION</Text>
+        <Text style={{ fontSize: 8.4, fontWeight: 800, color: INK, letterSpacing: 0.6 }}>ATTENTION</Text>
         <Text style={{ fontSize: 7.6, color: INK, marginLeft: 6 }}>
           {`${items.length} result${items.length === 1 ? '' : 's'} outside the reference range${crit ? `, ${crit} critical` : ''}`}
         </Text>
@@ -231,7 +259,7 @@ function AbnormalSummary({ d }: { d: ReportData }) {
             return (
               <View
                 key={i}
-                style={{ width: 126, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 0.6, borderColor: tint(s.fg, 0.65), borderLeftWidth: 2.5, borderLeftColor: s.fg, borderRadius: 3.5, paddingVertical: 2.4, paddingHorizontal: 4 }}
+                style={{ width: 126, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 0.8, borderColor: INK, borderLeftWidth: 2.5, borderLeftColor: INK, borderRadius: 3.5, paddingVertical: 2.4, paddingHorizontal: 4 }}
               >
                 <Text style={{ width: 78, fontSize: 6.9, fontWeight: 600, color: INK, textOverflow: 'ellipsis' } as never}>{l.parameter.replace(' (calculated)', '')}</Text>
                 <View style={{ flexGrow: 1 }} />
@@ -252,7 +280,7 @@ function ReportDocument({ d }: { d: ReportData }) {
   const lh = d.variant === 'print' && d.branch.letterhead.enabled;
   const top = lh ? d.branch.letterhead.topMm * MM : null;
   const bottom = lh ? d.branch.letterhead.bottomMm * MM : null;
-  const b = d.brand;
+  const b = PRINT_BRAND;
   return (
     <Document
       title={`Laboratory report ${d.reportNo}`}
@@ -265,7 +293,7 @@ function ReportDocument({ d }: { d: ReportData }) {
         margin={{ top: 0, bottom: 0, left: 0, right: 0 } as never}
         {...(!lh && d.branch.backgroundDataUri ? { backgroundImage: d.branch.backgroundDataUri, backgroundSize: 'cover' as const, backgroundOpacity: 0.12 } : {})}
       >
-        {d.amended ? <Watermark text="AMENDED" fontSize={80} color="rgba(185,28,28,0.07)" angle={-35} /> : null}
+        {d.amended ? <Watermark text="AMENDED" fontSize={80} color="rgba(0,0,0,0.12)" angle={-35} /> : null}
         <LabHeader
           b={d.branch}
           brand={b}
@@ -307,14 +335,8 @@ function ReportDocument({ d }: { d: ReportData }) {
 
           <View wrap={false} style={{ marginTop: 8 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              {d.incharge ? <SignatureCard s={d.incharge} brand={b} align="left" /> : <View />}
-              <View style={{ alignItems: 'flex-end' }}>
-                {d.signers.map((s, i) => (
-                  <View key={i} style={{ marginTop: i ? 8 : 0 }}>
-                    <SignatureCard s={s} brand={b} align="right" />
-                  </View>
-                ))}
-              </View>
+              <LabInchargeStamp />
+              <PathologistStamp />
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
               <View style={{ flexGrow: 1, height: 0.6, backgroundColor: LINE }} />
@@ -322,9 +344,12 @@ function ReportDocument({ d }: { d: ReportData }) {
               <View style={{ flexGrow: 1, height: 0.6, backgroundColor: LINE }} />
             </View>
             <Text style={{ fontSize: 6.2, color: MUTED, textAlign: 'center', marginTop: 3 }}>
-              {`Electronically authorized and issued ${d.issuedAt}. Verify authenticity by scanning the QR code or at ${d.verificationUrl}`}
+              {`Electronically issued. Verify authenticity by scanning the QR code or at ${d.verificationUrl}`}
             </Text>
             {d.branch.footerText ? <Text style={{ fontSize: 6.4, color: MUTED, textAlign: 'center', marginTop: 2 }}>{d.branch.footerText}</Text> : null}
+            <Text style={{ fontSize: 8, fontWeight: 800, color: INK, textAlign: 'center', marginTop: 4, letterSpacing: 0.5 }}>
+              NOT VALID FOR COURT OF LAW
+            </Text>
           </View>
         </View>
 
@@ -335,5 +360,5 @@ function ReportDocument({ d }: { d: ReportData }) {
 
 export async function renderReportPdf(data: ReportData): Promise<Uint8Array> {
   registerFonts();
-  return renderDocument(<ReportDocument d={data} />);
+  return renderDocument(<ReportDocument d={{ ...data, brand: PRINT_BRAND }} />);
 }

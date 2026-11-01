@@ -85,6 +85,7 @@ async function generateUnlocked(
        JOIN tests t ON t.id = oi.test_id
        JOIN departments d ON d.id = t.department_id
        WHERE oi.order_id = ? AND r.status = 'authorized'
+         AND (r.value_numeric IS NOT NULL OR NULLIF(TRIM(r.value_text), '') IS NOT NULL)
        ORDER BY d.display_order, d.name, t.display_order, t.name, tp.display_order, tp.id`,
     )
     .all(orderId) as Array<Record<string, any>>;
@@ -133,11 +134,11 @@ async function generateUnlocked(
     .all(orderId) as Array<{ accession_no: string; specimen_type: string; collected_at: string | null; received_at: string | null }>;
   const signerRows = db
     .prepare(
-      `SELECT u.full_name AS name, u.role, u.qualifications, u.signature_path, MAX(r.authorized_at) AS at
+      `SELECT u.full_name AS name, u.role, u.qualifications, u.signature_path
        FROM results r JOIN order_items oi ON oi.id = r.order_item_id JOIN users u ON u.id = r.authorized_by
        WHERE oi.order_id = ? AND r.status = 'authorized' GROUP BY u.id ORDER BY u.full_name`,
     )
-    .all(orderId) as Array<{ name: string; role: string; qualifications: string | null; signature_path: string | null; at: string | null }>;
+    .all(orderId) as Array<{ name: string; role: string; qualifications: string | null; signature_path: string | null }>;
   const earliest = (xs: Array<string | null>) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
   const collectedAt = earliest(specimens.map((x) => x.collected_at));
   const receivedAt = earliest(specimens.map((x) => x.received_at));
@@ -199,7 +200,7 @@ async function generateUnlocked(
       name: x.name,
       qualifications: x.qualifications,
       signatureDataUri: dataUri(x.signature_path, 'image/png'),
-      note: x.at ? `Authorized ${stamp(x.at)}` : null,
+      note: null,
     })),
   };
 

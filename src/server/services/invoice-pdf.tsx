@@ -11,6 +11,7 @@ import {
   LabHeader,
   Label,
   MUTED,
+  PRINT_BRAND,
   SOFT,
   VerifyQr,
   registerFonts,
@@ -46,10 +47,10 @@ export interface InvoiceData {
 const pkr = (n: number) => n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const STATUS: Record<string, { label: string; fg: string; bg: string; sym: string }> = {
-  paid: { label: 'PAID', fg: '#047857', bg: '#ECFDF5', sym: '●' },
-  partially_paid: { label: 'PARTIALLY PAID', fg: '#B45309', bg: '#FFFBEB', sym: '●' },
-  issued: { label: 'PAYMENT DUE', fg: '#B91C1C', bg: '#FEF2F2', sym: '●' },
-  void: { label: 'VOID', fg: '#475569', bg: '#F1F5F9', sym: '●' },
+  paid: { label: 'PAID', fg: '#000000', bg: '#FFFFFF', sym: '●' },
+  partially_paid: { label: 'PARTIALLY PAID', fg: '#000000', bg: '#FFFFFF', sym: '●' },
+  issued: { label: 'PAYMENT DUE', fg: '#000000', bg: '#FFFFFF', sym: '●' },
+  void: { label: 'VOID', fg: '#000000', bg: '#FFFFFF', sym: '●' },
 };
 
 const METHOD: Record<string, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', jazzcash: 'JazzCash', easypaisa: 'Easypaisa' };
@@ -77,7 +78,7 @@ function SummaryRow({ k, v, color, strong }: { k: string; v: string; color?: str
 const PAY_COLS = [86, 44, 60, 80] as const;
 
 function InvoiceDocument({ d }: { d: InvoiceData }) {
-  const b = d.brand;
+  const b = PRINT_BRAND;
   const st = STATUS[d.status] ?? STATUS.issued!;
   const isVoid = d.status === 'void';
   const due = isVoid ? 0 : d.balance;
@@ -87,7 +88,7 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
   const desc = 539 - 8 - C.n - C.price - C.tax - C.total;
   const heroLabel = isVoid ? 'INVOICE VOIDED' : due > 0 ? 'BALANCE DUE' : 'AMOUNT PAID';
   const heroAmount = isVoid ? d.total : due > 0 ? due : d.paid - d.refunded;
-  const heroBg = isVoid ? '#64748B' : due > 0 ? b.primary : '#047857';
+  const heroBg = '#000000';
   const head = { fontSize: 6.4, fontWeight: 700, color: b.primary, letterSpacing: 0.8 } as const;
   return (
     <Document title={`Invoice ${d.invoiceNo}`} author={d.branch.name} style={{ fontFamily: FONT, fontSize: 8, color: INK }}>
@@ -107,19 +108,19 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
                 <KV k="Referred by" v={d.patient.practitioner ?? 'Self'} width={86} />
               </View>
             </View>
-            <View style={{ width: 172, borderRadius: 7, backgroundColor: heroBg, paddingVertical: 9, paddingHorizontal: 11 }}>
+            <View style={{ width: 172, borderWidth: 1, borderColor: '#000000', borderRadius: 7, backgroundColor: heroBg, paddingVertical: 9, paddingHorizontal: 11 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={{ fontSize: 6.5, fontWeight: 700, color: tint(heroBg, 0.6), letterSpacing: 1 }}>{heroLabel}</Text>
+                <Text style={{ fontSize: 6.5, fontWeight: 700, color: '#FFFFFF', letterSpacing: 1 }}>{heroLabel}</Text>
                 <View style={{ flexGrow: 1 }} />
                 <View style={{ backgroundColor: '#FFFFFF', borderRadius: 9999, paddingHorizontal: 6, paddingVertical: 1.5 }}>
                   <Text style={{ fontSize: 6.4, fontWeight: 800, color: st.fg, letterSpacing: 0.6 }}>{`${st.sym} ${st.label}`}</Text>
                 </View>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 7 }}>
-                <Text style={{ fontSize: 9, fontWeight: 700, color: tint(heroBg, 0.55), marginRight: 4, marginBottom: 3 }}>PKR</Text>
+                <Text style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', marginRight: 4, marginBottom: 3 }}>PKR</Text>
                 <Text style={{ fontSize: 21, fontWeight: 800, color: '#FFFFFF' }}>{pkr(heroAmount)}</Text>
               </View>
-              <Text style={{ fontSize: 6.8, color: tint(heroBg, 0.65), marginTop: 4 }}>{`Total ${pkr(d.total)}   •   Paid ${pkr(d.paid - d.refunded)}`}</Text>
+              <Text style={{ fontSize: 6.8, fontWeight: 600, color: '#FFFFFF', marginTop: 4 }}>{`Total ${pkr(d.total)}   •   Paid ${pkr(d.paid - d.refunded)}`}</Text>
             </View>
           </View>
           {isVoid && d.voidReason ? (
@@ -131,7 +132,7 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
           <View style={{ marginTop: 12 }}>
             <SectionTitle brand={b} right={`${d.lines.length} ${d.lines.length === 1 ? 'item' : 'items'}`}>Tests and services</SectionTitle>
             <View style={{ borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden' }}>
-              <View style={{ flexDirection: 'row', backgroundColor: tint(b.primary, 0.92), paddingVertical: 4, paddingHorizontal: 4 }}>
+              <View style={{ flexDirection: 'row', backgroundColor: '#E5E5E5', borderBottomWidth: 1, borderBottomColor: '#000000', paddingVertical: 4, paddingHorizontal: 4 }}>
                 <Text style={{ ...head, width: C.n }}>#</Text>
                 <Text style={{ ...head, width: desc }}>DESCRIPTION</Text>
                 <Text style={{ ...head, width: C.price, textAlign: 'right' }}>PRICE</Text>
@@ -154,13 +155,13 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
             <View style={{ flexGrow: 1, flexShrink: 1, marginRight: 14 }}>
               <SectionTitle brand={b}>Payments</SectionTitle>
               {d.payments.length ? (
-                <View style={{ borderWidth: 0.6, borderColor: LINE, borderRadius: 5, overflow: 'hidden' }}>
-                  <View style={{ flexDirection: 'row', backgroundColor: SOFT, paddingVertical: 3, paddingHorizontal: 5, borderBottomWidth: 0.6, borderBottomColor: LINE }}>
+                <View style={{ borderWidth: 0.8, borderColor: LINE, borderRadius: 5, overflow: 'hidden' }}>
+                  <View style={{ flexDirection: 'row', backgroundColor: '#E5E5E5', paddingVertical: 3, paddingHorizontal: 5, borderBottomWidth: 0.8, borderBottomColor: '#000000' }}>
                     {(['Date', 'Type', 'Method', 'Reference'] as const).map((h, i) => (
-                      <Text key={h} style={{ width: PAY_COLS[i], fontSize: 6, fontWeight: 700, color: FAINT, letterSpacing: 0.7 }}>{h.toUpperCase()}</Text>
+                      <Text key={h} style={{ width: PAY_COLS[i], fontSize: 6.5, fontWeight: 800, color: INK, letterSpacing: 0.7 }}>{h.toUpperCase()}</Text>
                     ))}
                     <View style={{ flexGrow: 1 }} />
-                    <Text style={{ fontSize: 6, fontWeight: 700, color: FAINT, letterSpacing: 0.7 }}>AMOUNT</Text>
+                    <Text style={{ fontSize: 6.5, fontWeight: 800, color: INK, letterSpacing: 0.7 }}>AMOUNT</Text>
                   </View>
                   {d.payments.map((p, i) => (
                     <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 3.2, paddingHorizontal: 5, backgroundColor: i % 2 ? SOFT : '#FFFFFF' }}>
@@ -223,5 +224,5 @@ function InvoiceDocument({ d }: { d: InvoiceData }) {
 
 export async function renderInvoicePdf(d: InvoiceData): Promise<Uint8Array> {
   registerFonts();
-  return renderDocument(<InvoiceDocument d={d} />);
+  return renderDocument(<InvoiceDocument d={{ ...d, brand: PRINT_BRAND }} />);
 }

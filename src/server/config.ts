@@ -9,7 +9,7 @@ const DATA = join(ROOT, 'data');
 const FILES = join(DATA, 'files');
 
 export const config = {
-  version: '1.0.0',
+  version: '1.0.1',
   host: '127.0.0.1',
   port: Number(process.env.LMS_PORT ?? 8080),
   dbFile: process.env.LMS_DB_FILE ?? join(DATA, 'lms.db'),

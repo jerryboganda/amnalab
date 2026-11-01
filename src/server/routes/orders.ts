@@ -461,8 +461,8 @@ export function registerOrders(r: Router, db: DatabaseSync) {
         `SELECT oi.id AS order_item_id, oi.status, oi.tat_due_at, o.id AS order_id, o.order_no, o.priority, o.created_at,
                 p.full_name AS patient_name, p.mrn, t.id AS test_id, t.name AS test_name, t.code AS test_code,
                 d.id AS department_id, d.name AS department_name, sp.accession_no, sp.specimen_type,
-                (SELECT COUNT(*) FROM test_parameters tp WHERE tp.test_id = t.id AND tp.is_active = 1) AS parameter_count,
-                (SELECT COUNT(*) FROM results r WHERE r.order_item_id = oi.id AND r.status = 'authorized') AS authorized_count
+                (SELECT COUNT(*) FROM results r WHERE r.order_item_id = oi.id AND r.status <> 'cancelled'
+                  AND (r.value_numeric IS NOT NULL OR NULLIF(TRIM(r.value_text), '') IS NOT NULL)) AS result_count
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
          JOIN patients p ON p.id = o.patient_id
@@ -516,8 +516,10 @@ export function orderDetail(db: DatabaseSync, user: AuthUser, id: number) {
   const items = db
     .prepare(
       `SELECT oi.id, oi.status, oi.specimen_id, oi.tat_due_at, t.id AS test_id, t.code AS test_code, t.name AS test_name, d.name AS department_name,
-              (SELECT COUNT(*) FROM results r WHERE r.order_item_id = oi.id AND r.status = 'authorized') AS authorized_count,
-              (SELECT COUNT(*) FROM results r WHERE r.order_item_id = oi.id AND r.status <> 'cancelled') AS result_count
+              (SELECT COUNT(*) FROM results r WHERE r.order_item_id = oi.id AND r.status = 'authorized'
+                AND (r.value_numeric IS NOT NULL OR NULLIF(TRIM(r.value_text), '') IS NOT NULL)) AS authorized_count,
+              (SELECT COUNT(*) FROM results r WHERE r.order_item_id = oi.id AND r.status <> 'cancelled'
+                AND (r.value_numeric IS NOT NULL OR NULLIF(TRIM(r.value_text), '') IS NOT NULL)) AS result_count
        FROM order_items oi JOIN tests t ON t.id = oi.test_id JOIN departments d ON d.id = t.department_id
        WHERE oi.order_id = ? ORDER BY d.display_order, t.name`,
     )
